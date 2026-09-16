@@ -54,12 +54,10 @@ const DefaultFlushTimeout = 5 * time.Second
 // Supply an explicit provider or a callback paired with the emitting provider.
 var ErrFlushUnavailable = errors.New("otelbridge: global provider has no identifiable flush target")
 
-// attrStackCap stages attributes in a stack array so building them adds no
-// allocation of its own up to this width; beyond it the slice spills to the
-// heap once. It is deliberately above log.Record's own 5-attribute inline
-// capacity — the record starts allocating before this buffer does, so the
-// staging buffer is never the first thing to cost an allocation.
-const attrStackCap = 8
+// attrStackCap stages narrow entries on the stack. Wider upper bounds reserve
+// one heap slice sized from the entry, avoiding geometric append growth.
+// Correlation and duplicate fields may reduce the final attribute count.
+const attrStackCap = 16
 
 // Attribute keys the adapter derives from entry metadata rather than from a
 // logged field. A field of the same name takes precedence — see attributes.
@@ -94,8 +92,8 @@ const (
 // TestAdapter_AllocationBudgets (which holds these as ceilings):
 //
 //	up to 5 attributes                      0 allocs
-//	6+ attributes (past Record inline)      1 alloc
-//	9+ attributes (past the staging buffer) 2 allocs
+//	6–16 plain attributes                  1 alloc
+//	17 attributes (past the staging buffer) 2 allocs
 //	correlated (Bind)                       2 allocs, for the span context
 //
 // A severity the SDK drops skips the attribute work entirely, but still pays
@@ -300,7 +298,7 @@ func (a *Adapter) build(entry *types.LogEntry) (context.Context, otellog.Record,
 	// one this record will actually carry. Probing cheaply and emitting richly
 	// would drop records the pipeline wanted. The cost is that a dropped
 	// correlated record still pays for its context — see the budgets.
-	ctx, consumed := a.spanContext(entry)
+	ctx, consumed, fieldCount := a.spanContext(entry)
 
 	if !a.logger.Enabled(ctx, otellog.EnabledParameters{Severity: sev}) {
 		return ctx, rec, false
@@ -318,9 +316,34 @@ func (a *Adapter) build(entry *types.LogEntry) (context.Context, otellog.Record,
 
 	// One AddAttributes call, not one per attribute: past the record's inline
 	// capacity each call grows the overflow slice again.
-	var stack [attrStackCap]otellog.KeyValue
-	rec.AddAttributes(a.attributes(stack[:0], entry, consumed)...)
+	if capacity := attributeCapacity(entry, fieldCount); capacity != 0 {
+		var stack [attrStackCap]otellog.KeyValue
+		attributes := stack[:0]
+		if capacity > len(stack) {
+			// Bound wide-record scratch by the entry shape, not append's
+			// geometric growth. The Record still takes its own attribute copy.
+			attributes = make([]otellog.KeyValue, 0, capacity)
+		}
+		rec.AddAttributes(a.attributes(attributes, entry, consumed)...)
+	}
 	return ctx, rec, true
+}
+
+// attributeCapacity adds metadata to the bound from the existing correlation
+// traversal. This O(1) step adds no indexed-store lock or extra field traversal.
+// Duplicates and consumed correlation can reduce the actual attribute count.
+// It never evaluates user Error methods or converts field values.
+func attributeCapacity(entry *types.LogEntry, n int) int {
+	if entry.Component != "" {
+		n++
+	}
+	if entry.ErrorMsg != "" || entry.Error != nil {
+		n++
+	}
+	if entry.File != "" && entry.Line >= 0 {
+		n += 2
+	}
+	return n
 }
 
 // entryTime resolves the entry's timestamp the way the JSON formatter's
@@ -335,8 +358,9 @@ func entryTime(entry *types.LogEntry) time.Time {
 	return entry.Timestamp
 }
 
-// spanContext rebuilds the span the entry was logged under, and reports which
-// correlation fields it consumed. The adapter interface passes no
+// spanContext rebuilds the span the entry was logged under, reports which
+// correlation fields it consumed, and counts fields for bounded staging in the
+// same traversal. The adapter interface passes no
 // context.Context, so the only trace information available is what Bind
 // already stamped onto the entry as fields — re-parsing those hex strings is
 // what puts a real TraceID on the record instead of a pair of attributes the
@@ -352,12 +376,14 @@ func entryTime(entry *types.LogEntry) time.Time {
 // attributes, visible to whoever has to debug it rather than silently dropped.
 // Consumption is tracked per key. The final occurrence is authoritative even
 // when invalid or redacted: it clears earlier data and remains an attribute.
-func (a *Adapter) spanContext(entry *types.LogEntry) (context.Context, uint8) {
+func (a *Adapter) spanContext(entry *types.LogEntry) (context.Context, uint8, int) {
 	var (
-		cfg      trace.SpanContextConfig
-		consumed uint8
+		cfg        trace.SpanContextConfig
+		consumed   uint8
+		fieldCount int
 	)
 	forEachField(entry, func(key string, f types.TypedFieldData) {
+		fieldCount++
 		// Match the key before touching the value: every other field on the
 		// entry would otherwise be converted here only to be discarded.
 		var bit uint8
@@ -405,9 +431,9 @@ func (a *Adapter) spanContext(entry *types.LogEntry) (context.Context, uint8) {
 	})
 
 	if consumed&bitTraceID == 0 {
-		return context.Background(), 0
+		return context.Background(), 0, fieldCount
 	}
-	return trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(cfg)), consumed
+	return trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(cfg)), consumed, fieldCount
 }
 
 // attributes appends the entry's fields, context, component, error, and source
