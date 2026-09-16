@@ -334,8 +334,8 @@ func entryTime(entry *types.LogEntry) time.Time {
 //
 // A correlation key that never parsed is reported unconsumed and stays in the
 // attributes, visible to whoever has to debug it rather than silently dropped.
-// Consumption is tracked per key, not per occurrence, so where one key appears
-// twice and only one parses, both are consumed and the last parsed value wins.
+// Consumption is tracked per key. The final occurrence is authoritative even
+// when invalid or redacted: it clears earlier data and remains an attribute.
 func (a *Adapter) spanContext(entry *types.LogEntry) (context.Context, uint8) {
 	var (
 		cfg      trace.SpanContextConfig
@@ -354,6 +354,18 @@ func (a *Adapter) spanContext(entry *types.LogEntry) (context.Context, uint8) {
 			bit = bitTraceFlags
 		default:
 			return
+		}
+
+		// Clear before parsing. A final redaction, malformed value or wrong
+		// type must not leave an earlier valid ID/flag on the emitted record.
+		consumed &^= bit
+		switch bit {
+		case bitTraceID:
+			cfg.TraceID = trace.TraceID{}
+		case bitSpanID:
+			cfg.SpanID = trace.SpanID{}
+		case bitTraceFlags:
+			cfg.TraceFlags = 0
 		}
 
 		hex, ok := stringOf(f)
@@ -387,7 +399,9 @@ func (a *Adapter) spanContext(entry *types.LogEntry) (context.Context, uint8) {
 //
 // The correlation fields consumed into the record's trace context are skipped:
 // they are already its TraceID and SpanID, and re-emitting them as attributes
-// would have the backend index the same value twice. One that did not parse
+// would have the backend index the same value twice. For unconsumed correlation
+// keys, only the final occurrence stays: stale values must not cross Emit before
+// an SDK can deduplicate them. One that did not parse
 // was not consumed, and stays.
 //
 // A logged field wins over the metadata the adapter would derive under the
@@ -403,27 +417,42 @@ func (a *Adapter) spanContext(entry *types.LogEntry) (context.Context, uint8) {
 // storage forms directly.
 func (a *Adapter) attributes(dst []otellog.KeyValue, entry *types.LogEntry, consumed uint8) []otellog.KeyValue {
 	var claimed uint8
+	// Fixed-size, one-based indexes avoid a map and another field traversal.
+	// Zero means no attribute has been appended for that correlation key.
+	var correlationSlots [3]int
 
 	add := func(key string, f types.TypedFieldData) {
 		if key == "" {
 			return
 		}
+		correlationSlot := -1
 		switch key {
 		case keyTraceID.Name:
 			if consumed&bitTraceID != 0 {
 				return
 			}
+			correlationSlot = 0
 		case keySpanID.Name:
 			if consumed&bitSpanID != 0 {
 				return
 			}
+			correlationSlot = 1
 		case keyTraceFlags.Name:
 			if consumed&bitTraceFlags != 0 {
 				return
 			}
+			correlationSlot = 2
 		}
 		claimed |= derivedKeyBit(key)
-		dst = append(dst, otellog.KeyValue{Key: key, Value: logValue(f)})
+		kv := otellog.KeyValue{Key: key, Value: logValue(f)}
+		if correlationSlot >= 0 {
+			if slot := correlationSlots[correlationSlot]; slot != 0 {
+				dst[slot-1] = kv
+				return
+			}
+			correlationSlots[correlationSlot] = len(dst) + 1
+		}
+		dst = append(dst, kv)
 	}
 
 	forEachField(entry, add)
