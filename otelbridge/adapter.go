@@ -31,6 +31,7 @@ package otelbridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -45,10 +46,13 @@ import (
 // DefaultAdapterName is the adapter's registry name when WithName is not given.
 const DefaultAdapterName = "otel"
 
-// DefaultFlushTimeout bounds Flush and Close when WithFlushTimeout is not
-// given. It is finite on purpose: Fatal flushes and then exits, so an
-// exporter that never returns would hold the process open indefinitely.
+// DefaultFlushTimeout is the cooperative drain deadline used by Flush and Close.
+// A provider that ignores context cancellation can still block.
 const DefaultFlushTimeout = 5 * time.Second
+
+// ErrFlushUnavailable reports an unknown drain target for a global proxy.
+// Supply an explicit provider or a callback paired with the emitting provider.
+var ErrFlushUnavailable = errors.New("otelbridge: global provider has no identifiable flush target")
 
 // attrStackCap stages attributes in a stack array so building them adds no
 // allocation of its own up to this width; beyond it the slice spills to the
@@ -102,10 +106,12 @@ const (
 // A real SDK adds its own cost on top; these are the adapter's, not the
 // export pipeline's.
 type Adapter struct {
-	logger       otellog.Logger
-	provider     otellog.LoggerProvider
-	name         string
-	flushTimeout time.Duration
+	logger         otellog.Logger
+	provider       otellog.LoggerProvider
+	name           string
+	flushTimeout   time.Duration
+	flushFunc      func(context.Context) error
+	globalProvider bool
 }
 
 // forceFlusher is the drain method a LoggerProvider may offer.
@@ -120,6 +126,13 @@ type adapterConfig struct {
 	version      string
 	schemaURL    string
 	flushTimeout time.Duration
+	flushFunc    func(context.Context) error
+}
+
+// WithFlushFunc supplies the drain operation paired with the emitting provider.
+// The callback must honor cancellation and remain paired if the global changes.
+func WithFlushFunc(fn func(context.Context) error) Option {
+	return func(c *adapterConfig) { c.flushFunc = fn }
 }
 
 // Option configures an Adapter.
@@ -157,13 +170,8 @@ func WithSchemaURL(url string) Option {
 	return func(c *adapterConfig) { c.schemaURL = url }
 }
 
-// WithFlushTimeout bounds how long Flush and Close wait for the provider to
-// drain, replacing DefaultFlushTimeout.
-//
-// The bound is what keeps a wedged exporter from wedging the program: Fatal
-// flushes and then exits, so an unbounded drain there is a hang with no log
-// line to explain it. A non-positive duration waits indefinitely — say so
-// explicitly if that is what you want.
+// WithFlushTimeout sets a cooperative drain deadline; it cannot interrupt a
+// provider that ignores cancellation. A non-positive duration means no deadline.
 func WithFlushTimeout(d time.Duration) Option {
 	return func(c *adapterConfig) { c.flushTimeout = d }
 }
@@ -176,7 +184,8 @@ func NewAdapter(scopeName string, opts ...Option) *Adapter {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	if cfg.provider == nil {
+	usesGlobal := cfg.provider == nil
+	if usesGlobal {
 		cfg.provider = global.GetLoggerProvider()
 	}
 
@@ -188,10 +197,12 @@ func NewAdapter(scopeName string, opts ...Option) *Adapter {
 		logOpts = append(logOpts, otellog.WithSchemaURL(cfg.schemaURL))
 	}
 	return &Adapter{
-		logger:       cfg.provider.Logger(scopeName, logOpts...),
-		provider:     cfg.provider,
-		name:         cfg.name,
-		flushTimeout: cfg.flushTimeout,
+		logger:         cfg.provider.Logger(scopeName, logOpts...),
+		provider:       cfg.provider,
+		name:           cfg.name,
+		flushTimeout:   cfg.flushTimeout,
+		flushFunc:      cfg.flushFunc,
+		globalProvider: usesGlobal,
 	}
 }
 
@@ -228,28 +239,33 @@ func (a *Adapter) WriteZero(entry *types.LogEntry) error { return a.Write(entry)
 // processor's queue is the last place the most important line in the program
 // can be, and the caller never gets a chance to drain it itself.
 //
-// The wait is bounded by WithFlushTimeout (DefaultFlushTimeout otherwise) and
-// a drain that times out returns the error rather than blocking the exit.
+// WithFlushTimeout (DefaultFlushTimeout otherwise) supplies a cooperative
+// deadline. The provider or callback must honor cancellation.
 func (a *Adapter) Flush() error {
-	f, ok := a.provider.(forceFlusher)
-	if !ok {
-		return nil
+	flush := a.flushFunc
+	if flush == nil {
+		if f, ok := a.provider.(forceFlusher); ok {
+			flush = f.ForceFlush
+		} else if a.globalProvider {
+			return ErrFlushUnavailable
+		} else {
+			return nil // Explicit provider exposes no drain operation.
+		}
 	}
 	if a.flushTimeout <= 0 {
-		return f.ForceFlush(context.Background())
+		return flush(context.Background())
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), a.flushTimeout)
 	defer cancel()
 
-	// The error is returned, not swallowed, but the deadline is what matters
-	// on the Fatal path: Logger.Flush discards the error and exits, so a
-	// wedged exporter costs at most flushTimeout instead of the process.
-	return f.ForceFlush(ctx)
+	// The error is returned, not swallowed. A callback that ignores cancellation
+	// can still block; this API cannot forcibly terminate provider code.
+	return flush(ctx)
 }
 
 // Close drains the provider but does not shut it down. The provider belongs
-// to the caller and is usually shared with tracing, so Shutdown stays theirs
+// to the caller and may be shared by other loggers, so Shutdown stays theirs
 // to call; closing one adapter must not tear down everyone's pipeline.
 func (a *Adapter) Close() error { return a.Flush() }
 
