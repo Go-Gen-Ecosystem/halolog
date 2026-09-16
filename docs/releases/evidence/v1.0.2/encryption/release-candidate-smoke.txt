@@ -1,0 +1,12 @@
+goos: windows
+goarch: amd64
+pkg: github.com/go-gen-ecosystem/halolog/masking
+cpu: Intel(R) Core(TM) Ultra 9 285HX
+BenchmarkFieldEncryptor_Encrypt 	 6960403	       182.4 ns/op	      64 B/op	       1 allocs/op
+BenchmarkFieldEncryptor_Encrypt 	 6554142	       177.1 ns/op	      64 B/op	       1 allocs/op
+BenchmarkFieldEncryptor_Encrypt 	 6750484	       181.5 ns/op	      64 B/op	       1 allocs/op
+BenchmarkFieldEncryptor_Decrypt 	12796082	        89.56 ns/op	      16 B/op	       1 allocs/op
+BenchmarkFieldEncryptor_Decrypt 	13820473	        88.09 ns/op	      16 B/op	       1 allocs/op
+BenchmarkFieldEncryptor_Decrypt 	12837505	        88.08 ns/op	      16 B/op	       1 allocs/op
+PASS
+ok  	github.com/go-gen-ecosystem/halolog/masking	8.222s
