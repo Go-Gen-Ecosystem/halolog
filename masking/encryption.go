@@ -39,7 +39,7 @@ var (
 	ErrInvalidCiphertext = errors.New("invalid ciphertext")
 )
 
-// FieldEncryptor provides AES-256-GCM field-level encryption
+// FieldEncryptor provides AES-GCM field-level encryption.
 // Thread-safe for concurrent use
 type FieldEncryptor struct {
 	mu     sync.RWMutex
@@ -50,6 +50,8 @@ type FieldEncryptor struct {
 
 // NewFieldEncryptor creates a new AES-256 field encryptor
 // The key can be any length - it will be hashed to 32 bytes using SHA-256
+// Hashing does not add entropy or provide password stretching: use a high-entropy
+// secret. Existing key derivation is retained for ciphertext compatibility.
 func NewFieldEncryptor(key string) (*FieldEncryptor, error) {
 	if key == "" {
 		return nil, ErrInvalidKeyLength
@@ -82,8 +84,8 @@ func NewFieldEncryptor(key string) (*FieldEncryptor, error) {
 // key yields AES-128-GCM, 24 bytes AES-192-GCM, and 32 bytes AES-256-GCM. The
 // key material is never zero-padded — doing so would silently downgrade the
 // effective entropy and misrepresent the AES variant, so any other length is
-// rejected with ErrInvalidKeyLength. For a full AES-256 key derived from an
-// arbitrary passphrase, use NewFieldEncryptor.
+// rejected with ErrInvalidKeyLength. NewFieldEncryptor retains a SHA-256-based
+// string-key compatibility path; it is not a password-stretching function.
 func NewFieldEncryptorWithKey(key []byte) (*FieldEncryptor, error) {
 	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
 		return nil, ErrInvalidKeyLength
@@ -111,8 +113,10 @@ func NewFieldEncryptorWithKey(key []byte) (*FieldEncryptor, error) {
 	}, nil
 }
 
-// Encrypt encrypts a plaintext value using AES-256-GCM
-// Returns base64-encoded ciphertext with prefix
+// Encrypt encrypts plaintext using AES-GCM with the constructor's key size.
+// It returns an independently owned prefix + Base64(nonce || ciphertext || tag).
+// Small calls may reuse scrubbed scratch; cold calls and larger values allocate
+// additional scratch. No returned string aliases reusable memory.
 func (e *FieldEncryptor) Encrypt(plaintext string) (string, error) {
 	if plaintext == "" {
 		return "", nil
@@ -121,18 +125,34 @@ func (e *FieldEncryptor) Encrypt(plaintext string) (string, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	// Generate random nonce
-	nonce := make([]byte, e.gcm.NonceSize())
+	// Scratch holds both the raw record and its Base64 representation. Small
+	// operations borrow a private, scrubbed buffer; the returned string always
+	// owns its storage and is never an alias into reusable scratch.
+	nonceSize := e.gcm.NonceSize()
+	rawSize, totalSize, ok := encryptionBufferSize(len(plaintext), nonceSize, e.gcm.Overhead(), len(e.prefix))
+	if !ok {
+		return "", ErrEncryptionFailed
+	}
+	scratch, owner := acquireEncryptionScratch(totalSize)
+	if owner != nil {
+		defer releaseEncryptionScratch(scratch, owner)
+	}
+	raw := scratch[:rawSize:rawSize]
+	nonce := raw[:nonceSize:nonceSize]
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", ErrEncryptionFailed
 	}
 
-	// Encrypt with GCM (includes authentication)
-	ciphertext := e.gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	// AEAD explicitly permits plaintext[:0] as dst. Reserve the tag capacity
+	// while keeping the nonce and encoded-output regions outside that slice.
+	plain := raw[nonceSize : nonceSize+len(plaintext)]
+	copy(plain, plaintext)
+	sealed := e.gcm.Seal(plain[:0], nonce, plain, nil)
 
-	// Encode to base64 and add prefix
-	encoded := base64.StdEncoding.EncodeToString(ciphertext)
-	return e.prefix + encoded, nil
+	encoded := scratch[rawSize:]
+	copy(encoded, e.prefix)
+	base64.StdEncoding.Encode(encoded[len(e.prefix):], raw[:nonceSize+len(sealed)])
+	return string(encoded), nil
 }
 
 // Decrypt decrypts a base64-encoded ciphertext
@@ -155,10 +175,13 @@ func (e *FieldEncryptor) Decrypt(ciphertext string) (string, error) {
 	encoded := ciphertext[len(e.prefix):]
 
 	// Decode from base64
-	data, err := base64.StdEncoding.DecodeString(encoded)
+	data, owner := acquireEncryptionScratch(base64.StdEncoding.DecodedLen(len(encoded)))
+	defer releaseEncryptionScratch(data, owner)
+	n, err := base64.StdEncoding.Decode(data, []byte(encoded))
 	if err != nil {
 		return "", ErrInvalidCiphertext
 	}
+	data = data[:n]
 
 	// Extract nonce and ciphertext
 	nonceSize := e.gcm.NonceSize()
@@ -168,18 +191,23 @@ func (e *FieldEncryptor) Decrypt(ciphertext string) (string, error) {
 
 	nonce, encryptedData := data[:nonceSize], data[nonceSize:]
 
-	// Decrypt with authentication verification
-	plaintext, err := e.gcm.Open(nil, nonce, encryptedData, nil)
+	// Reuse only this call's decoded ciphertext buffer. Open's exact-overlap
+	// contract permits this; the nonce is outside the writable destination.
+	plaintext, err := e.gcm.Open(encryptedData[:0], nonce, encryptedData, nil)
 	if err != nil {
 		return "", ErrDecryptionFailed
 	}
 
-	return string(plaintext), nil
+	return string(plaintext), nil // the deferred release scrubs scratch after this copy
 }
 
-// IsEncrypted checks if a value appears to be encrypted (has prefix)
+// IsEncrypted checks only the prefix, not authenticity. Use Decrypt to verify
+// the authentication tag; this predicate is not a security boundary.
 func (e *FieldEncryptor) IsEncrypted(value string) bool {
-	return len(value) > len(e.prefix) && value[:len(e.prefix)] == e.prefix
+	e.mu.RLock()
+	prefix := e.prefix
+	e.mu.RUnlock()
+	return len(value) > len(prefix) && value[:len(prefix)] == prefix
 }
 
 // SetPrefix sets a custom prefix for encrypted values
@@ -189,10 +217,13 @@ func (e *FieldEncryptor) SetPrefix(prefix string) {
 	e.prefix = prefix
 }
 
-// GlobalFieldEncryptor is the singleton encryptor for system-wide use
+// GlobalFieldEncryptor is the singleton encryptor for system-wide use.
+// Initialize it before starting concurrent consumers. Replacing this exported
+// variable is not synchronized and is not a supported concurrent rotation API.
 var GlobalFieldEncryptor *FieldEncryptor
 
-// InitGlobalEncryptor initializes the global field encryptor
+// InitGlobalEncryptor initializes the global field encryptor during startup,
+// before concurrent consumers are started.
 func InitGlobalEncryptor(key string) error {
 	encryptor, err := NewFieldEncryptor(key)
 	if err != nil {

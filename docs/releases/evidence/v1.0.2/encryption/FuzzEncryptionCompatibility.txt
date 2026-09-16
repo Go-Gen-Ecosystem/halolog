@@ -1,0 +1,25 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/4 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 4/4 completed, now fuzzing with 4 workers
+fuzz: elapsed: 3s, execs: 288782 (96240/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 6s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 9s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 12s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 15s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 18s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 21s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 24s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 27s, execs: 288782 (0/sec), new interesting: 7 (total: 11)
+fuzz: elapsed: 30s, execs: 6283904 (1998487/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 33s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 36s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 39s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 42s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 45s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 48s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 51s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 54s, execs: 6283904 (0/sec), new interesting: 8 (total: 12)
+fuzz: elapsed: 57s, execs: 10966579 (1561104/sec), new interesting: 10 (total: 14)
+fuzz: elapsed: 1m0s, execs: 11303120 (112166/sec), new interesting: 12 (total: 16)
+fuzz: elapsed: 1m1s, execs: 11303120 (0/sec), new interesting: 12 (total: 16)
+PASS
+ok  	github.com/go-gen-ecosystem/halolog/masking	61.294s
