@@ -3,7 +3,7 @@ module github.com/go-gen-ecosystem/halolog/otelbridge
 go 1.24.0
 
 require (
-	github.com/go-gen-ecosystem/halolog v1.0.1
+	github.com/go-gen-ecosystem/halolog v1.0.2
 	go.opentelemetry.io/otel/log v0.17.0
 	go.opentelemetry.io/otel/sdk/log v0.17.0
 	go.opentelemetry.io/otel/trace v1.41.0
