@@ -21,19 +21,28 @@ permissions:
 
 jobs:
   alloc-guard:
-    name: zero-alloc guards (hard gate)
-    runs-on: ubuntu-latest
+    name: allocation contracts / ${{ matrix.os }} / Go ${{ matrix.go }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        go: ['1.24.0', stable]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: stable
+          go-version: ${{ matrix.go }}
           cache: true
       - name: Zero-allocation guards
+        shell: bash
         env:
           GOWORK: off
         run: |
           go test ./core -run 'TestZeroAlloc' -count=1 -v
+          # Allocation budgets describe uninstrumented code. Race correctness
+          # runs separately in CI; regex budget tests use a !race build tag.
+          go test ./masking -run 'Test.*Alloc' -count=1 -v
           go test ./adapters/formatters/json -run 'TestHeaderZeroAlloc|TestFormatterGolden|TestDirectMatchesFormat' -count=1 -v
 
   bench:

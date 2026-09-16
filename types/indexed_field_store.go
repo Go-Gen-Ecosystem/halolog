@@ -430,6 +430,22 @@ func (eqfs *IndexedFieldStore) Iterate(fn func(key, value string)) {
 	}
 }
 
+// TransformValues replaces active values without allocating a merged snapshot.
+// The caller must own the store exclusively when lock-free writes are enabled.
+// The callback must not call another method on this store or retain mutable state.
+func (eqfs *IndexedFieldStore) TransformValues(fn func(key, value string) string) {
+	eqfs.mu.Lock()
+	defer eqfs.mu.Unlock()
+	for chunkIdx, mask := range eqfs.bitmasks {
+		for bitsLeft := mask; bitsLeft != 0; bitsLeft &= bitsLeft - 1 {
+			i := bits.TrailingZeros64(bitsLeft)
+			if i < len(eqfs.keys[chunkIdx]) {
+				eqfs.values[chunkIdx][i] = fn(eqfs.keys[chunkIdx][i], eqfs.values[chunkIdx][i])
+			}
+		}
+	}
+}
+
 // Reset clears all chunks for reuse
 func (eqfs *IndexedFieldStore) Reset() {
 	eqfs.mu.Lock()

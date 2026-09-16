@@ -1,0 +1,71 @@
+{
+  "note": "Counts include subtests. The root run predates three additional security tests, which were run separately. Race selection filters are documented in the review; excluded tests do not appear as Go skip events. Raw JSONL sources are retained locally under output/encryption-review-20260916.",
+  "runs": [
+    {
+      "log": "root-tests",
+      "passedPackages": 29,
+      "passedTestEvents": 1421,
+      "failures": [],
+      "skippedTestNames": [
+        "TestFileAdapter_SecureDefaultPermissions",
+        "TestSlogtestConformance/zero-time"
+      ],
+      "finalAction": "pass",
+      "sourceSHA256": "CD193A5400653988BABE36C1AEECF3BCDA2C8D9563C97DBAF27BF2AAFA51312B"
+    },
+    {
+      "log": "go124-tests",
+      "passedPackages": 3,
+      "passedTestEvents": 544,
+      "failures": [],
+      "skippedTestNames": [],
+      "finalAction": "pass",
+      "sourceSHA256": "50B6DA8DA0C2AAD869136D6DEA073AC219AEF7FD4F1203EB41616CD7CF503064"
+    },
+    {
+      "log": "security-final",
+      "passedPackages": 1,
+      "passedTestEvents": 137,
+      "failures": [],
+      "skippedTestNames": [],
+      "finalAction": "pass",
+      "sourceSHA256": "E5E60AF14193BA61D42565F13297EC24056AC8DA4D482A054D2F1C68595577C4"
+    },
+    {
+      "log": "security-go124-final",
+      "passedPackages": 1,
+      "passedTestEvents": 137,
+      "failures": [],
+      "skippedTestNames": [],
+      "finalAction": "pass",
+      "sourceSHA256": "BAEBDAB9702AE305B15296DBCB74ACE864889AAF2626D0F3477E53F32D09E49D"
+    },
+    {
+      "log": "core-race-final",
+      "passedPackages": 4,
+      "passedTestEvents": 633,
+      "failures": [],
+      "skippedTestNames": [],
+      "finalAction": "pass",
+      "sourceSHA256": "BDC3E81B8061D61E8A53A0088F6F1CEF986CCBF4089D0FCD1B2AFA43576706DA"
+    },
+    {
+      "log": "otel-integration-final",
+      "passedPackages": 1,
+      "passedTestEvents": 235,
+      "failures": [],
+      "skippedTestNames": [],
+      "finalAction": "pass",
+      "sourceSHA256": "9F67AF84E0368EC1C372930BAF452AD8D81C2EBD9F8E435625660B095470EF86"
+    },
+    {
+      "log": "otel-race-final",
+      "passedPackages": 1,
+      "passedTestEvents": 198,
+      "failures": [],
+      "skippedTestNames": [],
+      "finalAction": "pass",
+      "sourceSHA256": "5924E2430E01E233DDA76AD2322C4E9DBC7DB461B90D85F45B12FBC1808991C1"
+    }
+  ]
+}

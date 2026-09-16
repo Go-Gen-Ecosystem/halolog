@@ -8,6 +8,26 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-16
+
+### Fixed
+- Preserve masking across typed, legacy, static, bound, indexed and descriptor
+  field representations. Reject invalid policy updates without changing the
+  active policy and preserve redaction across overlapping regex matches.
+- Remove named masking rules by registration ownership rather than regex text;
+  replacing a name no longer accumulates stale rules or removes unrelated policy.
+- Remove process-lifetime retention of arbitrary regex inputs/results.
+- Synchronize encryption-prefix reads and preserve independently owned results.
+
+### Performance and verification
+- Reuse exclusive, scrubbed encryption scratch while retaining AES-GCM wire
+  compatibility and fresh random nonces. Selected warmed small-field operations
+  require one allocation; this is not a universal allocation-free claim.
+- Add regression, independent-oracle, fuzz, retention and concurrency tests.
+  Enforce allocation budgets separately from race/coverage instrumentation.
+- Document the security and measurement boundaries in
+  [the release validation notes](docs/releases/v1.0.2.md).
+
 ## [1.0.1] - 2026-08-28
 
 First public release. (A `v1.0.0` tag was cut minutes earlier and retracted
