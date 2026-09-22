@@ -1,0 +1,95 @@
+[toolchain]
+go version go1.27.1 windows/amd64
+[download]
+[test]
+=== RUN   TestPublishedBridgeConstructs
+--- PASS: TestPublishedBridgeConstructs (0.00s)
+PASS
+ok  	example.com/halolog-otelbridge-v103-consumer	0.351s
+[verify]
+all modules verified
+[selected modules]
+{
+	"Path": "github.com/go-gen-ecosystem/halolog/otelbridge",
+	"Version": "v1.0.3",
+	"Time": "2026-09-22T16:01:58Z",
+	"Dir": "D:\\lab\\go-gen-ecosystem\\go-gen-tools\\logger\\halolog\\output\\article-otel-v1.0.3-proxy-consumer\\fresh-cache3\\mod\\github.com\\go-gen-ecosystem\\halolog\\otelbridge@v1.0.3",
+	"GoMod": "D:\\lab\\go-gen-ecosystem\\go-gen-tools\\logger\\halolog\\output\\article-otel-v1.0.3-proxy-consumer\\fresh-cache3\\mod\\cache\\download\\github.com\\go-gen-ecosystem\\halolog\\otelbridge\\@v\\v1.0.3.mod",
+	"GoVersion": "1.24.0",
+	"Sum": "h1:4VjdA5TC7+rc4/R5crIZ/+73vuakLqCjPT+j14Scxcw=",
+	"GoModSum": "h1:oy7qUALK6Izfc4qEJ1ceaneNPtvkTnQaMY/Y8Xpf1PI="
+}
+{
+	"Path": "github.com/go-gen-ecosystem/halolog",
+	"Version": "v1.0.2",
+	"Time": "2026-09-16T07:29:35Z",
+	"Indirect": true,
+	"Dir": "D:\\lab\\go-gen-ecosystem\\go-gen-tools\\logger\\halolog\\output\\article-otel-v1.0.3-proxy-consumer\\fresh-cache3\\mod\\github.com\\go-gen-ecosystem\\halolog@v1.0.2",
+	"GoMod": "D:\\lab\\go-gen-ecosystem\\go-gen-tools\\logger\\halolog\\output\\article-otel-v1.0.3-proxy-consumer\\fresh-cache3\\mod\\cache\\download\\github.com\\go-gen-ecosystem\\halolog\\@v\\v1.0.2.mod",
+	"GoVersion": "1.24.0",
+	"Sum": "h1:Hpx5SyFPJJdtJqMcpmDpD5VGTtBNeSvc+ku1ZHtpLxA=",
+	"GoModSum": "h1:uV8jJ5UL07IXUxfFg50SIpWzsrbdj7sc1pHH7HI255g="
+}
+[module edit]
+{
+	"Module": {
+		"Path": "example.com/halolog-otelbridge-v103-consumer"
+	},
+	"Go": "1.27.1",
+	"Require": [
+		{
+			"Path": "github.com/go-gen-ecosystem/halolog/otelbridge",
+			"Version": "v1.0.3"
+		},
+		{
+			"Path": "github.com/cespare/xxhash/v2",
+			"Version": "v2.3.0",
+			"Indirect": true
+		},
+		{
+			"Path": "github.com/go-gen-ecosystem/halolog",
+			"Version": "v1.0.2",
+			"Indirect": true
+		},
+		{
+			"Path": "github.com/go-logr/logr",
+			"Version": "v1.4.3",
+			"Indirect": true
+		},
+		{
+			"Path": "github.com/go-logr/stdr",
+			"Version": "v1.2.2",
+			"Indirect": true
+		},
+		{
+			"Path": "go.opentelemetry.io/auto/sdk",
+			"Version": "v1.2.1",
+			"Indirect": true
+		},
+		{
+			"Path": "go.opentelemetry.io/otel",
+			"Version": "v1.41.0",
+			"Indirect": true
+		},
+		{
+			"Path": "go.opentelemetry.io/otel/log",
+			"Version": "v0.17.0",
+			"Indirect": true
+		},
+		{
+			"Path": "go.opentelemetry.io/otel/metric",
+			"Version": "v1.41.0",
+			"Indirect": true
+		},
+		{
+			"Path": "go.opentelemetry.io/otel/trace",
+			"Version": "v1.41.0",
+			"Indirect": true
+		},
+		{
+			"Path": "gopkg.in/yaml.v3",
+			"Version": "v3.0.1",
+			"Indirect": true
+		}
+	]
+}
