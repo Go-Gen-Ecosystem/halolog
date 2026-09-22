@@ -54,10 +54,15 @@ const DefaultFlushTimeout = 5 * time.Second
 // Supply an explicit provider or a callback paired with the emitting provider.
 var ErrFlushUnavailable = errors.New("otelbridge: global provider has no identifiable flush target")
 
-// attrStackCap stages narrow entries on the stack. Wider upper bounds reserve
-// one heap slice sized from the entry, avoiding geometric append growth.
-// Correlation and duplicate fields may reduce the final attribute count.
-const attrStackCap = 16
+// attrStackCap stages the common case on the stack. The wider bounded case is
+// isolated in a non-inlined helper so its larger scratch array does not inflate
+// every call's stack frame. Records beyond the bounded tier reserve one heap
+// slice sized from the entry, avoiding geometric append growth. Correlation and
+// duplicate fields may reduce the final attribute count.
+const (
+	attrStackCap     = 16
+	attrWideStackCap = 32
+)
 
 // Attribute keys the adapter derives from entry metadata rather than from a
 // logged field. A field of the same name takes precedence — see attributes.
@@ -91,10 +96,10 @@ const (
 // Cost per emitted record, measured against a discarding logger by
 // TestAdapter_AllocationBudgets (which holds these as ceilings):
 //
-//	up to 5 attributes                      0 allocs
-//	6–16 plain attributes                  1 alloc
-//	17 attributes (past the staging buffer) 2 allocs
-//	correlated (Bind)                       2 allocs, for the span context
+//	up to 5 attributes       0 allocs
+//	6–32 plain attributes   1 alloc, owned by the OTel record
+//	more than 32 attributes 2 allocs, including bounded staging
+//	correlated (Bind)        2 allocs, for the span context
 //
 // A severity the SDK drops skips the attribute work entirely, but still pays
 // for the span context: Enabled has to be asked under the same correlation
@@ -317,16 +322,30 @@ func (a *Adapter) build(entry *types.LogEntry) (context.Context, otellog.Record,
 	// One AddAttributes call, not one per attribute: past the record's inline
 	// capacity each call grows the overflow slice again.
 	if capacity := attributeCapacity(entry, fieldCount); capacity != 0 {
-		var stack [attrStackCap]otellog.KeyValue
-		attributes := stack[:0]
-		if capacity > len(stack) {
-			// Bound wide-record scratch by the entry shape, not append's
+		switch {
+		case capacity <= attrStackCap:
+			var stack [attrStackCap]otellog.KeyValue
+			rec.AddAttributes(a.attributes(stack[:0], entry, consumed)...)
+		case capacity <= attrWideStackCap:
+			a.addWideAttributes(&rec, entry, consumed)
+		default:
+			// Bound very wide scratch by the entry shape, not append's
 			// geometric growth. The Record still takes its own attribute copy.
-			attributes = make([]otellog.KeyValue, 0, capacity)
+			attributes := make([]otellog.KeyValue, 0, capacity)
+			rec.AddAttributes(a.attributes(attributes, entry, consumed)...)
 		}
-		rec.AddAttributes(a.attributes(attributes, entry, consumed)...)
 	}
 	return ctx, rec, true
+}
+
+// addWideAttributes avoids heap staging for bounded wide records without
+// charging the common path for this larger stack frame. AddAttributes copies
+// the values into storage owned by rec before the local array goes out of scope.
+//
+//go:noinline
+func (a *Adapter) addWideAttributes(rec *otellog.Record, entry *types.LogEntry, consumed uint8) {
+	var stack [attrWideStackCap]otellog.KeyValue
+	rec.AddAttributes(a.attributes(stack[:0], entry, consumed)...)
 }
 
 // attributeCapacity adds metadata to the bound from the existing correlation
