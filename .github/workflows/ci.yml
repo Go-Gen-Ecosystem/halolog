@@ -30,7 +30,6 @@ jobs:
       GOTOOLCHAIN: local
       # Resolve public dependencies independently of developer machines and
       # setup-go module caches. Sum verification must remain enabled.
-      GOMODCACHE: ${{ runner.temp }}/otel-module-cache
       GOPROXY: https://proxy.golang.org
       GOSUMDB: sum.golang.org
       GOPRIVATE: ''
@@ -45,6 +44,7 @@ jobs:
       - name: Verify local integration or published dependency
         env:
           CORE_MODE: ${{ matrix.core }}
+          GOMODCACHE: ${{ runner.temp }}/otel-module-cache
         run: |
           bash scripts/verify-otelbridge.sh "$CORE_MODE"
           git diff --exit-code -- otelbridge/go.mod otelbridge/go.sum
