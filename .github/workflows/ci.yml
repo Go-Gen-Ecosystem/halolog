@@ -14,22 +14,37 @@ jobs:
       coverage-threshold: 60
 
   otelbridge:
-    name: otelbridge module
+    name: otelbridge / ${{ matrix.core }} core / Go ${{ matrix.go }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [local, published]
+        go: ['1.24.0', stable]
     permissions:
       contents: read
-    defaults:
-      run:
-        working-directory: otelbridge
+    env:
+      GOENV: 'off'
+      GOWORK: 'off'
+      GOFLAGS: ''
+      GOTOOLCHAIN: local
+      # Resolve public dependencies independently of developer machines and
+      # setup-go module caches. Sum verification must remain enabled.
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
+      GOPRIVATE: ''
+      GONOPROXY: ''
+      GONOSUMDB: ''
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: stable
-          cache-dependency-path: otelbridge/go.sum
-      - name: Verify module
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: Verify local integration or published dependency
         env:
-          GOWORK: off
+          CORE_MODE: ${{ matrix.core }}
+          GOMODCACHE: ${{ runner.temp }}/otel-module-cache
         run: |
-          go vet ./...
-          go test -race ./... -count=1
+          bash scripts/verify-otelbridge.sh "$CORE_MODE"
+          git diff --exit-code -- otelbridge/go.mod otelbridge/go.sum

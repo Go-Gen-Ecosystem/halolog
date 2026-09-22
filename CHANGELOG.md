@@ -8,6 +8,58 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Added
+- **`otelbridge.NewAdapter` — logs out to OpenTelemetry.** An output adapter
+  emitting each entry into the OpenTelemetry Logs API, so a line can reach an
+  OTLP backend as a LogRecord while a console or file adapter keeps writing it
+  to stderr; register both and the logger's existing fan-out does the rest.
+  `Bind`'s `trace_id`/`span_id` fields are parsed back into a span context so
+  the record carries a real TraceID and SpanID — what a backend correlates on
+  — rather than three attributes it cannot join against. Fields, context,
+  component, error, and caller location become attributes; HaloLog levels map
+  onto the OpenTelemetry severity scale, and record timestamps resolve
+  `TimestampUnix` before the wall-clock `Timestamp`, matching the JSON
+  formatter — the hot path writes only the former, so the other order dates
+  every record to the zero time. Masked values win over the typed original a
+  masker replaced, so nothing the masker caught crosses the export boundary.
+  Unsigned values above `math.MaxInt64` emit as exact decimal strings rather
+  than wrapping negative, and `[]byte` attributes are copied, because
+  `log.BytesValue` retains the caller's array while records outlive the call.
+  Correlation is consumed per field: a valid trace id is the only requirement
+  (the data model allows a record that names its trace but no span), and a
+  field that fails to parse is left in the attributes rather than dropped.
+  A logged field wins over metadata the adapter would derive under the same
+  key, so `component`, `error`, and the source-location keys never appear
+  twice on one record; fields with no key are dropped rather than emitted
+  under `""`. A `LoggerProvider` handing back a nil `Logger` is reported
+  through `Write` and `Health` instead of panicking inside the logging call.
+  Per-shape allocation budgets are measured and gated by
+  `TestAdapter_AllocationBudgets` (0 allocs up to five attributes; 2 for a
+  correlated record's span context). A severity the SDK drops skips the
+  attribute work but still pays for the span context, because `Enabled` is
+  asked under the same correlation context `Emit` uses. `Flush` and
+  `Close` drain the provider through `ForceFlush`, bounded by
+  `WithFlushTimeout` (`DefaultFlushTimeout`, 5s, otherwise) — `Fatal` flushes
+  and exits from inside the logging call, so a no-op flush would lose the last
+  line a program writes and an unbounded one would hold the process open —
+  but never `Shutdown` it, which stays the caller's. End-to-end tests run the
+  real `sdk/log` pipeline and assert what an exporter receives. The adapter
+  owns no shutdown lifecycle: `Flush` and `Close` request `ForceFlush`, while
+  provider shutdown remains the caller's responsibility. Adds
+  `go.opentelemetry.io/otel/log` to the `otelbridge` module only; the core
+  logger's dependencies are unchanged.
+
+### Corrected dependency and validation
+- Require HaloLog core v1.0.2, making field-name and regex masking contracts
+  unconditional across console and OpenTelemetry output.
+- Make final correlation occurrences authoritative so a masked, malformed, or
+  wrongly typed duplicate cannot restore an earlier trace identity.
+- Bound attribute staging by record shape: 9 and 16 scalar fields now require
+  one allocation; retained-record tests protect value ownership.
+- Add published/local dependency gates on Go 1.24 and stable, real-SDK
+  context-sensitive filtering, negative controls, lifecycle/backpressure tests,
+  and separate uninstrumented allocation contracts.
+
 ## [1.0.2] - 2026-09-16
 
 ### Fixed
