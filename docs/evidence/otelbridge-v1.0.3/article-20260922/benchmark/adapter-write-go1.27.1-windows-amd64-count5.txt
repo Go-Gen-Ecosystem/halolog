@@ -1,0 +1,66 @@
+goos: windows
+goarch: amd64
+pkg: github.com/go-gen-ecosystem/halolog/otelbridge
+cpu: Intel(R) Core(TM) Ultra 9 285HX
+BenchmarkAdapterWrite/no_fields-24         	 7065597	        34.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/no_fields-24         	 7087066	        34.09 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/no_fields-24         	 7040992	        34.35 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/no_fields-24         	 7091863	        33.95 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/no_fields-24         	 7039836	        33.95 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/5_fields_(record_inline_capacity)-24         	 1300412	       184.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/5_fields_(record_inline_capacity)-24         	 1311655	       183.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/5_fields_(record_inline_capacity)-24         	 1308099	       183.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/5_fields_(record_inline_capacity)-24         	 1311457	       182.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/5_fields_(record_inline_capacity)-24         	 1306257	       184.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/6_fields_(spills_past_inline)-24             	 1000000	       225.1 ns/op	      48 B/op	       1 allocs/op
+BenchmarkAdapterWrite/6_fields_(spills_past_inline)-24             	 1000000	       228.5 ns/op	      48 B/op	       1 allocs/op
+BenchmarkAdapterWrite/6_fields_(spills_past_inline)-24             	 1000000	       278.4 ns/op	      48 B/op	       1 allocs/op
+BenchmarkAdapterWrite/6_fields_(spills_past_inline)-24             	  975980	       237.9 ns/op	      48 B/op	       1 allocs/op
+BenchmarkAdapterWrite/6_fields_(spills_past_inline)-24             	 1000000	       242.6 ns/op	      48 B/op	       1 allocs/op
+BenchmarkAdapterWrite/9_fields-24                                  	  489276	       464.5 ns/op	     160 B/op	       1 allocs/op
+BenchmarkAdapterWrite/9_fields-24                                  	  621358	       439.9 ns/op	     160 B/op	       1 allocs/op
+BenchmarkAdapterWrite/9_fields-24                                  	  788022	       348.6 ns/op	     160 B/op	       1 allocs/op
+BenchmarkAdapterWrite/9_fields-24                                  	  860616	       470.3 ns/op	     160 B/op	       1 allocs/op
+BenchmarkAdapterWrite/9_fields-24                                  	  420786	       558.8 ns/op	     160 B/op	       1 allocs/op
+BenchmarkAdapterWrite/16_fields_(common_staging_capacity)-24       	  312861	       781.0 ns/op	     448 B/op	       1 allocs/op
+BenchmarkAdapterWrite/16_fields_(common_staging_capacity)-24       	  293332	       687.6 ns/op	     448 B/op	       1 allocs/op
+BenchmarkAdapterWrite/16_fields_(common_staging_capacity)-24       	  390598	       701.8 ns/op	     448 B/op	       1 allocs/op
+BenchmarkAdapterWrite/16_fields_(common_staging_capacity)-24       	  261519	       782.4 ns/op	     448 B/op	       1 allocs/op
+BenchmarkAdapterWrite/16_fields_(common_staging_capacity)-24       	  389618	       631.6 ns/op	     448 B/op	       1 allocs/op
+BenchmarkAdapterWrite/17_fields_(wide_staging_begins)-24           	  389540	       881.7 ns/op	     480 B/op	       1 allocs/op
+BenchmarkAdapterWrite/17_fields_(wide_staging_begins)-24           	  441338	       575.8 ns/op	     480 B/op	       1 allocs/op
+BenchmarkAdapterWrite/17_fields_(wide_staging_begins)-24           	  287434	       727.9 ns/op	     480 B/op	       1 allocs/op
+BenchmarkAdapterWrite/17_fields_(wide_staging_begins)-24           	  316339	       771.3 ns/op	     480 B/op	       1 allocs/op
+BenchmarkAdapterWrite/17_fields_(wide_staging_begins)-24           	  300326	       731.3 ns/op	     480 B/op	       1 allocs/op
+BenchmarkAdapterWrite/32_fields_(wide_staging_capacity)-24         	  166362	      1203 ns/op	    1152 B/op	       1 allocs/op
+BenchmarkAdapterWrite/32_fields_(wide_staging_capacity)-24         	  234250	      1275 ns/op	    1152 B/op	       1 allocs/op
+BenchmarkAdapterWrite/32_fields_(wide_staging_capacity)-24         	  194348	      1422 ns/op	    1152 B/op	       1 allocs/op
+BenchmarkAdapterWrite/32_fields_(wide_staging_capacity)-24         	  231787	      1357 ns/op	    1152 B/op	       1 allocs/op
+BenchmarkAdapterWrite/32_fields_(wide_staging_capacity)-24         	  161355	      1465 ns/op	    1152 B/op	       1 allocs/op
+BenchmarkAdapterWrite/33_fields_(bounded_staging_spill)-24         	  131226	      1857 ns/op	    2560 B/op	       2 allocs/op
+BenchmarkAdapterWrite/33_fields_(bounded_staging_spill)-24         	  157407	      1443 ns/op	    2560 B/op	       2 allocs/op
+BenchmarkAdapterWrite/33_fields_(bounded_staging_spill)-24         	  213160	      1371 ns/op	    2560 B/op	       2 allocs/op
+BenchmarkAdapterWrite/33_fields_(bounded_staging_spill)-24         	  133664	      1844 ns/op	    2560 B/op	       2 allocs/op
+BenchmarkAdapterWrite/33_fields_(bounded_staging_spill)-24         	  206634	      1335 ns/op	    2560 B/op	       2 allocs/op
+BenchmarkAdapterWrite/context_fields-24                            	 1227598	       186.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/context_fields-24                            	 1253700	       184.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/context_fields-24                            	 1332778	       174.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/context_fields-24                            	 1419739	       176.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/context_fields-24                            	 1262779	       203.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/indexed_fields-24                            	  871538	       269.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/indexed_fields-24                            	  967809	       252.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/indexed_fields-24                            	  784030	       260.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/indexed_fields-24                            	 1000000	       254.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/indexed_fields-24                            	  834406	       266.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAdapterWrite/4_KiB_byte_payload_(owned_copy)-24           	  264747	       893.4 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkAdapterWrite/4_KiB_byte_payload_(owned_copy)-24           	  307368	       948.8 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkAdapterWrite/4_KiB_byte_payload_(owned_copy)-24           	  233712	      1147 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkAdapterWrite/4_KiB_byte_payload_(owned_copy)-24           	  304390	       928.8 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkAdapterWrite/4_KiB_byte_payload_(owned_copy)-24           	  242560	       954.3 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkAdapterWrite/correlated-24                                	 1000000	       288.6 ns/op	     128 B/op	       2 allocs/op
+BenchmarkAdapterWrite/correlated-24                                	 1000000	       277.8 ns/op	     128 B/op	       2 allocs/op
+BenchmarkAdapterWrite/correlated-24                                	  981674	       296.3 ns/op	     128 B/op	       2 allocs/op
+BenchmarkAdapterWrite/correlated-24                                	  997340	       284.6 ns/op	     128 B/op	       2 allocs/op
+BenchmarkAdapterWrite/correlated-24                                	 1000000	       368.8 ns/op	     128 B/op	       2 allocs/op
+PASS
+ok  	github.com/go-gen-ecosystem/halolog/otelbridge	15.720s
