@@ -217,7 +217,7 @@ logger := core.New().
     Adapters(
         console.New(),
         otelbridge.NewAdapter("github.com/acme/checkout",
-            otelbridge.WithLoggerProvider(provider)), // omit for the global provider
+            otelbridge.WithLoggerProvider(provider)),
     ).
     MustBuild()
 
@@ -237,30 +237,43 @@ three attributes it cannot join against. A valid trace id is the only
 requirement; the data model allows a record that names its trace without
 naming a span, so a trace id still correlates when the span id is absent.
 Anything that does not parse is not consumed and stays in the attributes,
-where it is still visible. Without a preceding `Bind` the record is emitted
-uncorrelated.
+where it is still visible. For duplicate correlation keys, the final occurrence
+is authoritative; a final malformed or masked value cannot revive an earlier
+identifier. Without a preceding `Bind` the record is emitted uncorrelated.
 
-Cost per emitted record, measured against a discarding logger and held as
-ceilings by `TestAdapter_AllocationBudgets`:
+The following are medians of five one-second local runs on Go 1.27.1,
+windows/amd64, Intel Core Ultra 9 285HX, against a discarding API logger. They
+measure the adapter, not an SDK, exporter, collector, network, or backend. The
+committed allocation tests are ceilings; these measured timings are not CI
+thresholds. The numbered field rows use integer scalar fields.
 
 | Record shape | ns/op | B/op | allocs |
 | --- | --- | --- | --- |
-| no fields | 61 | 0 | 0 |
-| up to 5 attributes | 200 | 0 | 0 |
-| 6+ attributes (past `log.Record`'s inline capacity) | 279 | 48 | 1 |
-| 9+ attributes (past the adapter's staging buffer) | 639 | 864 | 2 |
-| context fields | 154 | 0 | 0 |
-| indexed fields | 181 | 0 | 0 |
-| correlated through `Bind` | 317 | 128 | 2 |
+| no fields | 34.56 | 0 | 0 |
+| 5 scalar fields (`log.Record` inline capacity) | 185.4 | 0 | 0 |
+| 6 scalar fields | 232.4 | 48 | 1 |
+| 9 scalar fields | 330.1 | 160 | 1 |
+| 16 scalar fields | 544.1 | 448 | 1 |
+| 17 scalar fields | 631.2 | 1,184 | 2 |
+| 2 context fields plus 2 scalar fields | 158.5 | 0 | 0 |
+| 2 indexed fields plus 2 scalar fields | 197.8 | 0 | 0 |
+| 4 KiB `[]byte` payload (owned copy) | 382.1 | 4,096 | 1 |
+| 2 scalar fields plus trace correlation | 250.4 | 128 | 2 |
 
 A severity the SDK drops skips the attribute work but still pays for the
 span context: `Enabled` has to be asked under the same correlation context
 `Emit` would use, or a processor filtering on the sampled flag answers for a
-record that is not the one being emitted. A real SDK adds its own cost on
-top; those are the adapter's own.
+record that is not the one being emitted. A real SDK adds its own cost. An
+emitted `[]byte` attribute is deliberately copied so queued records cannot
+alias caller memory; that ownership guarantee costs one allocation and exactly
+the payload size for a single 4 KiB value. A disabled 4 KiB payload is not
+converted or copied; its measured median was 25.43 ns/op, 0 B/op, 0 allocs/op.
+Arbitrary interface values
+may allocate in their formatter and are not covered by scalar-field ceilings.
 
-`Flush` and `Close` drain the provider through its `ForceFlush`. That is not
-a convenience: `Fatal` writes its line, calls `Logger.Flush`, and exits the
+`Flush` and `Close` drain an explicitly supplied provider through its
+`ForceFlush`. That is not a convenience: `Fatal` writes its line, calls
+`Logger.Flush`, and exits the
 process from inside the logging call, so a batching processor's queue would
 otherwise swallow the last line a program ever writes.
 
@@ -270,6 +283,17 @@ is what stops a wedged exporter holding the process open: a drain that times
 out returns the error and lets `Fatal` reach its exit. Neither method shuts
 the provider down; it belongs to the caller and is usually shared with
 tracing, so `Shutdown` stays theirs to call.
+
+The default global proxy can delegate emission to a provider installed later,
+but it cannot identify that provider's optional `ForceFlush`. In that case
+`Flush` returns `ErrFlushUnavailable`. Supply the provider explicitly, or pair
+late global initialization with `WithFlushFunc(provider.ForceFlush)`. The
+callback stays bound to the emission target even if the global is replaced.
+The timeout is cooperative: provider code that ignores context cancellation
+cannot be forcibly preempted.
+
+The complete validation boundary and reproduction commands are documented in
+[`docs/otelbridge-validation.md`](docs/otelbridge-validation.md).
 
 ### Timestamp precision
 

@@ -131,11 +131,12 @@ func TestCorrelationEnabledEmitConsistency(t *testing.T) {
 			switch change {
 			case "trace_id", "span_id", "trace_flags":
 				adversarialMaskOneField(t, entry, change)
-				if change == "trace_id" {
+				switch change {
+				case "trace_id":
 					wantTrace, wantSpan, wantFlags = trace.TraceID{}, trace.SpanID{}, 0
-				} else if change == "span_id" {
+				case "span_id":
 					wantSpan = trace.SpanID{}
-				} else {
+				default:
 					wantFlags = 0
 				}
 			case "different_request":
@@ -174,10 +175,11 @@ func TestCorrelationLastInvalidDuplicateWins(t *testing.T) {
 					original := trace.SpanContextFromContext(ctx)
 					redacted := types.TypedFieldData{Key: key, Val: types.StringValue("[MASKED]")}
 					wantValue := otellog.StringValue("[MASKED]")
-					if final == "malformed" {
+					switch final {
+					case "malformed":
 						redacted.Val = types.StringValue("not-hex")
 						wantValue = otellog.StringValue("not-hex")
-					} else if final == "wrong_type" {
+					case "wrong_type":
 						redacted.Val = types.IntValue(123)
 						wantValue = otellog.Int64Value(123)
 					}
@@ -221,9 +223,10 @@ func TestCorrelationAPIDuplicateValuesDoNotLeak(t *testing.T) {
 					_, entry := requestFixture(43)
 					last := types.TypedFieldData{Key: key, Val: types.StringValue("[MASKED]")}
 					want := otellog.StringValue("[MASKED]")
-					if final == "malformed" {
+					switch final {
+					case "malformed":
 						last.Val, want = types.StringValue("not-hex"), otellog.StringValue("not-hex")
-					} else if final == "wrong_type" {
+					case "wrong_type":
 						last.Val, want = types.IntValue(123), otellog.Int64Value(123)
 					}
 					if storage == "fields" {

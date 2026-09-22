@@ -3,12 +3,13 @@ package otelbridge
 import (
 	"context"
 	"errors"
-	"go.opentelemetry.io/otel/log/global"
 	"os"
 	"os/exec"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/log/global"
 )
 
 func TestLifecycle_LateGlobalProviderFlush(t *testing.T) {

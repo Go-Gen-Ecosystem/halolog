@@ -22,7 +22,9 @@ package otelbridge
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-gen-ecosystem/halolog/types"
@@ -72,6 +74,16 @@ func correlatedEntry() *types.LogEntry {
 	return entry
 }
 
+func correlatedEntryWithID(id uint64) *types.LogEntry {
+	entry := entryWith(2)
+	entry.Fields = append(entry.Fields,
+		types.TypedFieldData{Key: keyTraceID.Name, Val: types.StringValue(fmt.Sprintf("%032x", id))},
+		types.TypedFieldData{Key: keySpanID.Name, Val: types.StringValue(fmt.Sprintf("%016x", id))},
+		types.TypedFieldData{Key: keyTraceFlags.Name, Val: types.StringValue("01")},
+	)
+	return entry
+}
+
 func contextEntry() *types.LogEntry {
 	entry := entryWith(2)
 	entry.Context = []types.TypedFieldData{
@@ -89,6 +101,12 @@ func indexedEntry() *types.LogEntry {
 	return entry
 }
 
+func bytePayloadEntry() *types.LogEntry {
+	entry := entryWith(0)
+	entry.Fields = []types.TypedFieldData{{Key: "payload", Value: make([]byte, 4096)}}
+	return entry
+}
+
 // allocBudget is the per-case ceiling in allocations per emitted record.
 var allocBudget = []struct {
 	name   string
@@ -103,6 +121,7 @@ var allocBudget = []struct {
 	{"17 fields (staging spill)", func() *types.LogEntry { return entryWith(17) }, 2},
 	{"context fields", contextEntry, 0},
 	{"indexed fields", indexedEntry, 0},
+	{"4 KiB byte payload (owned copy)", bytePayloadEntry, 1},
 	{"correlated", correlatedEntry, 2},
 }
 
@@ -125,11 +144,26 @@ func BenchmarkAdapterWrite(b *testing.B) {
 // single-entry span cache across goroutines.
 func BenchmarkAdapterWriteParallel(b *testing.B) {
 	a := benchAdapter()
+	var identity atomic.Uint64
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
-		entry := correlatedEntry()
+		// Construction is outside the per-operation loop. Each worker represents a
+		// distinct request identity, guarding against shared correlation caches.
+		entry := correlatedEntryWithID(identity.Add(1))
 		for pb.Next() {
 			_ = a.Write(entry)
 		}
 	})
+}
+
+func BenchmarkAdapterWriteDisabledBytePayload(b *testing.B) {
+	a := NewAdapter("halolog/otelbridge_bench", WithLoggerProvider(&recorder{disableAll: true}))
+	entry := entryWith(0)
+	entry.Fields = []types.TypedFieldData{{Key: "payload", Value: make([]byte, 4096)}}
+	b.ReportAllocs()
+	b.SetBytes(4096)
+	b.ResetTimer()
+	for b.Loop() {
+		_ = a.Write(entry)
+	}
 }

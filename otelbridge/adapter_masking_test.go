@@ -81,8 +81,8 @@ func TestFanout_EveryExporterSeesTheMaskedValue(t *testing.T) {
 
 			line := bytes.TrimSpace(buf.Bytes())
 			if bytes.Contains(line, []byte(secret)) {
-				t.Skipf("core's JSON formatter disagrees with the masker on this builder, "+
-					"so stderr still carries the secret; gated on the core fix. line: %s", line)
+				t.Fatalf("core's JSON formatter disagrees with the masker on this builder, "+
+					"so stderr still carries the secret; requires the corrected core dependency. line: %s", line)
 			}
 			if !bytes.Contains(line, []byte(redacted)) {
 				t.Fatalf("console line carries neither the secret nor the redaction: %s", line)
@@ -92,8 +92,8 @@ func TestFanout_EveryExporterSeesTheMaskedValue(t *testing.T) {
 }
 
 // Regex rules must reach the value too, not just field-name rules. Probed by
-// behaviour rather than by inspecting the entry, so this starts passing on its
-// own once a released core masks typed values.
+// behaviour rather than by inspecting the entry, and required to pass against
+// the corrected core dependency.
 func TestFanout_EveryExporterSeesRegexMaskedValues(t *testing.T) {
 	for _, b := range builders {
 		t.Run(b.name, func(t *testing.T) {
@@ -103,8 +103,8 @@ func TestFanout_EveryExporterSeesRegexMaskedValues(t *testing.T) {
 
 			got := rec.only(t).attrs()["contact"].AsString()
 			if got == email {
-				t.Skipf("core does not regex-mask values reaching the entry this way yet; "+
-					"gated on the core fix (attribute was %q)", got)
+				t.Fatalf("core does not regex-mask values reaching the entry this way yet; "+
+					"requires the corrected core dependency (attribute was %q)", got)
 			}
 			if got != emailMask {
 				t.Fatalf("OTLP record exported %q, want %q", got, emailMask)
@@ -112,7 +112,7 @@ func TestFanout_EveryExporterSeesRegexMaskedValues(t *testing.T) {
 
 			line := bytes.TrimSpace(buf.Bytes())
 			if bytes.Contains(line, []byte(email)) {
-				t.Skipf("stderr still carries the address; gated on the core fix. line: %s", line)
+				t.Fatalf("stderr still carries the address; requires the corrected core dependency. line: %s", line)
 			}
 		})
 	}

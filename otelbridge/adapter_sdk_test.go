@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	jsonfmt "github.com/go-gen-ecosystem/halolog/adapters/formatters/json"
@@ -34,6 +35,7 @@ import (
 	"github.com/go-gen-ecosystem/halolog/types"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // memExporter collects exported records. Export must not retain the slice, so
@@ -205,5 +207,70 @@ func TestSDK_FilteredLevelNeverExports(t *testing.T) {
 	defer exp.mu.Unlock()
 	if len(exp.records) != 0 {
 		t.Fatalf("a filtered line reached the exporter: %d records", len(exp.records))
+	}
+}
+
+// sampledOnlyProcessor is deliberately context-sensitive. It verifies the
+// generic Logger contract: Enabled and OnEmit must see the same reconstructed
+// span context. This is not a claim about the SDK's built-in processors.
+type sampledOnlyProcessor struct {
+	next   sdklog.Processor
+	probes atomic.Int64
+}
+
+func (p *sampledOnlyProcessor) Enabled(ctx context.Context, params sdklog.EnabledParameters) bool {
+	p.probes.Add(1)
+	return trace.SpanContextFromContext(ctx).IsSampled() && p.next.Enabled(ctx, params)
+}
+
+func (p *sampledOnlyProcessor) OnEmit(ctx context.Context, record *sdklog.Record) error {
+	if !trace.SpanContextFromContext(ctx).IsSampled() {
+		return nil
+	}
+	return p.next.OnEmit(ctx, record)
+}
+
+func (p *sampledOnlyProcessor) ForceFlush(ctx context.Context) error {
+	return p.next.ForceFlush(ctx)
+}
+
+func (p *sampledOnlyProcessor) Shutdown(ctx context.Context) error {
+	return p.next.Shutdown(ctx)
+}
+
+func TestSDK_EnabledUsesTheEmittedSpanContext(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags string
+		want  int
+	}{
+		{name: "sampled", flags: "01", want: 1},
+		{name: "unsampled", flags: "00", want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exporter := &memExporter{}
+			gate := &sampledOnlyProcessor{next: sdklog.NewSimpleProcessor(exporter)}
+			provider := sdklog.NewLoggerProvider(sdklog.WithProcessor(gate))
+			t.Cleanup(func() {
+				if err := provider.Shutdown(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
+
+			entry := correlatedEntry()
+			entry.Fields[len(entry.Fields)-1].Val = types.StringValue(tc.flags)
+			if err := NewAdapter("test/sampled-gate", WithLoggerProvider(provider)).Write(entry); err != nil {
+				t.Fatal(err)
+			}
+			if gate.probes.Load() != 1 {
+				t.Fatalf("Enabled probes = %d, want 1", gate.probes.Load())
+			}
+			exporter.mu.Lock()
+			got := len(exporter.records)
+			exporter.mu.Unlock()
+			if got != tc.want {
+				t.Fatalf("exported = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

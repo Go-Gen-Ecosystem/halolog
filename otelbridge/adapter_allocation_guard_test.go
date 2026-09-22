@@ -42,6 +42,7 @@ func TestAdapter_DisabledSeverityPaysOnlyForCorrelation(t *testing.T) {
 		budget float64
 	}{
 		{"uncorrelated costs nothing", entryWith(9), 0},
+		{"byte payload is not copied", bytePayloadEntry(), 0},
 		{"correlated pays for its span context", correlatedEntry(), 2},
 		{"attributes add nothing to a dropped record", wide, 2},
 	}

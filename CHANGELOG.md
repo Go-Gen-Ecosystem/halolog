@@ -42,29 +42,23 @@ All notable changes to HaloLog are documented here. This project adheres to
   `WithFlushTimeout` (`DefaultFlushTimeout`, 5s, otherwise) — `Fatal` flushes
   and exits from inside the logging call, so a no-op flush would lose the last
   line a program writes and an unbounded one would hold the process open —
-  but never `Shutdown` it, which stays the caller's. End-to-end
-  tests run the real `sdk/log` pipeline and assert what an exporter receives. The adapter owns no lifecycle: flushing
-  and shutdown stay with the `LoggerProvider`. Adds
+  but never `Shutdown` it, which stays the caller's. End-to-end tests run the
+  real `sdk/log` pipeline and assert what an exporter receives. The adapter
+  owns no shutdown lifecycle: `Flush` and `Close` request `ForceFlush`, while
+  provider shutdown remains the caller's responsibility. Adds
   `go.opentelemetry.io/otel/log` to the `otelbridge` module only; the core
   logger's dependencies are unchanged.
 
-### Known gaps
-- **Regex masking does not reach typed string values.** `maskFieldFast` reads
-  `TypedFieldData.Value` for its regex branch, which the typed builders leave
-  nil (their value is in `Val`), so regex rules silently skip every field set
-  through `Typed()`, `Line()`, or a bound context. Field-name rules do apply,
-  but write only `Value`, leaving `Val` holding the original — consumers
-  reading typed storage first see the unmasked value.
-  `otelbridge.TestAdapter_RegexMaskingReachesAttributes` skips while this
-  holds and starts passing once it is fixed.
-- **The JSON formatter exports masked fields in clear.** `appendValue` reads
-  `TypedFieldData.Val` before `Value`, the inverse of the precedence the
-  masker writes with, so a field masked through the typed or bound-context
-  builders still reaches stderr unmasked — only the interface-boxed builder
-  is safe. Same root cause as the gap above, opposite symptom, and it means
-  the documented console+OTLP pairing currently masks on one half only.
-  `otelbridge.TestFanout_ConsoleAndOTelAgreeOnMaskedValues` skips with the
-  leaking line in its output while this holds.
+### Corrected dependency and validation
+- Require HaloLog core v1.0.2, making field-name and regex masking contracts
+  unconditional across console and OpenTelemetry output.
+- Make final correlation occurrences authoritative so a masked, malformed, or
+  wrongly typed duplicate cannot restore an earlier trace identity.
+- Bound attribute staging by record shape: 9 and 16 scalar fields now require
+  one allocation; retained-record tests protect value ownership.
+- Add published/local dependency gates on Go 1.24 and stable, real-SDK
+  context-sensitive filtering, negative controls, lifecycle/backpressure tests,
+  and separate uninstrumented allocation contracts.
 
 ## [1.0.2] - 2026-09-16
 
