@@ -20,6 +20,7 @@ package types
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -316,17 +317,45 @@ func TestReleaseLogEntry_NilSafe(t *testing.T) {
 }
 
 func TestNewLogEntryWithCaller(t *testing.T) {
-	e := NewLogEntryWithCaller(WarnLevel, "with-caller", 1)
+	_, file, marker, _ := runtime.Caller(0)
+	e := NewLogEntryWithCaller(WarnLevel, "with-caller", 0)
 	if e == nil {
 		t.Fatal("NewLogEntryWithCaller returned nil")
 	}
 	if e.Level != WarnLevel || e.Message != "with-caller" {
 		t.Errorf("NewLogEntryWithCaller did not set fields: %+v", e)
 	}
-	if e.File != "" || e.Line != 0 {
-		t.Errorf("NewLogEntryWithCaller should leave File/Line empty by default")
+	if e.File != file || e.Line != marker+1 {
+		t.Errorf("NewLogEntryWithCaller recorded %s:%d, want %s:%d", e.File, e.Line, file, marker+1)
 	}
 	ReleaseLogEntry(e)
+
+	for _, skip := range []int{-1, 65} {
+		e := NewLogEntryWithCaller(InfoLevel, "out of range", skip)
+		if e.File != "" || e.Line != 0 {
+			t.Errorf("skip %d recorded %s:%d, want no location", skip, e.File, e.Line)
+		}
+		ReleaseLogEntry(e)
+	}
+}
+
+// TestNewLogEntryWithCallerStartsClean pins that the constructor never hands
+// out a previous user's payload: it starts from AcquireLogEntry's reset.
+func TestNewLogEntryWithCallerStartsClean(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	seed := AcquireLogEntry()
+	seed.ErrorMsg = "previous tenant secret"
+	seed.StaticFieldCount = 1
+	seed.StaticFields = []TypedFieldData{{Key: "tenant_secret", Value: "previous"}}
+	seed.StaticContextCount = 1
+	seed.StaticContext = []TypedFieldData{{Key: "tenant_context", Value: "previous"}}
+	ReleaseLogEntry(seed)
+	fresh := NewLogEntryWithCaller(InfoLevel, "fresh record", 0)
+	defer ReleaseLogEntry(fresh)
+	if fresh.ErrorMsg != "" || fresh.StaticFieldCount != 0 || fresh.StaticContextCount != 0 {
+		t.Fatalf("constructor reused payload: ErrorMsg=%q StaticFieldCount=%d StaticContextCount=%d",
+			fresh.ErrorMsg, fresh.StaticFieldCount, fresh.StaticContextCount)
+	}
 }
 
 func TestUnixTimestampNow(t *testing.T) {

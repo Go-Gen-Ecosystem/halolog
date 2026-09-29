@@ -48,6 +48,26 @@ All notable changes to HaloLog are documented here. This project adheres to
   provider shutdown remains the caller's responsibility. Adds
   `go.opentelemetry.io/otel/log` to the `otelbridge` module only; the core
   logger's dependencies are unchanged.
+- **Call-site capture: `Builder.Caller()`.** A logger built with `Caller()`
+  (or `Config.EnableCaller`) records where each line was logged, as
+  `"caller":"file.go:42"`: the member the JSON formatter already renders for
+  an entry that carries a location. The direct path copies that member,
+  rendered once per call site, and the capture path fills `File`/`Line`, so
+  both stay byte-identical; the text formatter and `otelbridge` read the same
+  fields. Message-only lines, `Line`, `Typed()` and `WithField` terminals,
+  bound children, and Fatal/Panic all report the line that logged, and
+  `CallerSkip(n)` moves the site up for applications that log through their
+  own helpers. Each line walks the stack once; the first line from a call
+  site resolves and renders it, later lines reuse the result, so a site's
+  lines allocate nothing once it has logged (`TestZeroAlloc_Caller`). The
+  cache keeps up to 4,096 call sites per process; a site past that limit is
+  resolved again on each of its lines, which allocates. Off by default:
+  loggers without it do no stack walk, and filtered or sampled-out lines
+  return before it; Fatal and Panic keep their terminal behaviour at every
+  level threshold. The JSON formatter now also escapes
+  the caller's file name, so an unusual name cannot produce an invalid line,
+  and `types.NewLogEntryWithCaller` now records the location it is called
+  from, through the same call-site cache. Requested in #6.
 
 ### Corrected dependency and validation
 - Require HaloLog core v1.0.2, making field-name and regex masking contracts

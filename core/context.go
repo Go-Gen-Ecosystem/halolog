@@ -177,6 +177,8 @@ func (c Context) Logger() *Logger {
 		sampler:        parent.sampler,
 		metrics:        parent.metrics,
 		exitFunc:       parent.exitFunc,
+		recordCaller:   parent.recordCaller,
+		callerSkip:     parent.callerSkip,
 		rawWriter:      parent.rawWriter,
 		directAdapter:  parent.directAdapter,
 		boundFields:    c.fields,

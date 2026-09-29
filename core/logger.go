@@ -78,6 +78,12 @@ type Logger struct {
 	// Overridable via Config.ExitFunc for tests and embedders.
 	exitFunc func(int)
 
+	// Call-site capture (see caller.go). recordCaller is set only when
+	// Config.EnableCaller asks for it and output is not discarded; callerSkip
+	// counts wrapper frames between the application's call and HaloLog.
+	recordCaller bool
+	callerSkip   int
+
 	// Bound context (child loggers, see context.go). Both are immutable after
 	// construction and empty on root loggers. boundBytes is the context
 	// pre-encoded once as `,"k":v…` — the direct path emits it with a single
@@ -120,6 +126,17 @@ type Config struct {
 	// hosts that must intercept termination.
 	ExitFunc func(int)
 
+	// EnableCaller records where each line was logged, as the member
+	// "caller":"file.go:42". It adds one stack walk per line; loggers without
+	// it do no walk. Once a call site has logged, its lines allocate nothing,
+	// for up to 4096 call sites per process.
+	EnableCaller bool
+
+	// CallerSkip moves the recorded call site that many frames up, for
+	// applications that log through their own helper functions. Values are
+	// clamped to [0, 64].
+	CallerSkip int
+
 	// Advanced features
 	EnableAlerts      bool
 	EnableAggregation bool
@@ -142,6 +159,10 @@ func NewLogger(config Config) *Logger {
 			l.discardAdapter = da
 		}
 	}
+
+	// Recording call sites for discarded lines would be pure cost.
+	l.recordCaller = config.EnableCaller && l.discardAdapter == nil
+	l.callerSkip = clampCallerSkip(config.CallerSkip)
 
 	// Set up optional features
 	if config.EnableSampling && config.Sampler != nil {
@@ -183,6 +204,43 @@ func NewLogger(config Config) *Logger {
 // setupFunctionPointers sets up function pointers based on configuration.
 // This is the startup-time specialization - each level gets the exact function it needs.
 func (l *Logger) setupFunctionPointers(hot *hotState, level types.LogLevel) {
+	// Call-site capture: every level takes the pooled route, whose single
+	// dispatch point records the caller and still applies bound context,
+	// sampling, masking, metrics, and Fatal/Panic semantics. Loggers without
+	// it keep the specialised paths below, untouched.
+	if l.recordCaller {
+		hot.traceFunc = noopLog
+		if level <= types.TraceLevel {
+			hot.traceFunc = traceCaller
+		}
+		hot.debugFunc = noopLog
+		if level <= types.DebugLevel {
+			hot.debugFunc = debugCaller
+		}
+		hot.infoFunc = noopLog
+		if level <= types.InfoLevel {
+			hot.infoFunc = infoCaller
+		}
+		hot.warnFunc = noopLog
+		if level <= types.WarnLevel {
+			hot.warnFunc = warnCaller
+		}
+		hot.errorFunc = noopLog
+		if level <= types.ErrorLevel {
+			hot.errorFunc = errorCaller
+		}
+		// Fatal and Panic keep the contract they have without Caller: a root
+		// logger writes, flushes, and exits (or panics) at every threshold, and
+		// a bound child takes the pooled route that renders its context.
+		hot.fatalFunc = l.realFatal
+		hot.panicFunc = l.realPanic
+		if len(l.boundFields) > 0 {
+			hot.fatalFunc = fatalCaller
+			hot.panicFunc = panicCaller
+		}
+		return
+	}
+
 	// Bound context on a non-direct, non-discard logger: route every level
 	// through the pooled capture path, whose single dispatch point
 	// (dispatchLine) already handles the bound prefix, sampling, masking,
@@ -561,6 +619,10 @@ func (l *Logger) realFatal(_ *Logger, msg string) {
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
 	entry.StaticFieldCount = 0
+	if l.recordCaller {
+		site := l.callSiteAt(terminalCallerFrames) // Logger.Fatal, then its caller
+		entry.File, entry.Line = site.File, site.Line
+	}
 	l.writeEntry(&entry)
 	_ = l.Flush()
 	l.exit(1)
@@ -575,6 +637,10 @@ func (l *Logger) realPanic(_ *Logger, msg string) {
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
 	entry.StaticFieldCount = 0
+	if l.recordCaller {
+		site := l.callSiteAt(terminalCallerFrames) // Logger.Panic, then its caller
+		entry.File, entry.Line = site.File, site.Line
+	}
 	l.writeEntry(&entry)
 	panic(msg)
 }
@@ -600,7 +666,7 @@ func (l *Logger) logDirect(level types.LogLevel, msg string) {
 	enc, _ := l.directAdapter.DirectEncoder().(*jsonfmt.Formatter)
 	if enc == nil {
 		s := captureState(l)
-		dispatchLine(l, s, s.epoch, level, msg)
+		dispatchLine(l, s, s.epoch, level, msg, messageCallerFrames)
 		return
 	}
 	s := globalPerPPool.get()
@@ -631,7 +697,7 @@ func (l *Logger) errorDirect(_ *Logger, msg string) { l.logDirect(types.ErrorLev
 // metrics, and terminal semantics. No logic is duplicated here.
 func (l *Logger) logBoundCapture(level types.LogLevel, msg string) {
 	s := captureState(l)
-	dispatchLine(l, s, s.epoch, level, msg)
+	dispatchLine(l, s, s.epoch, level, msg, messageCallerFrames)
 }
 
 func (l *Logger) traceBound(_ *Logger, msg string) { l.logBoundCapture(types.TraceLevel, msg) }

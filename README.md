@@ -171,6 +171,30 @@ logger.DebugLine().WithString("dump", expensive()).Msg("trace") // ~1ns when Deb
 
 \* that is the level check itself; argument evaluation is still yours to guard.
 
+### Recording the call site
+
+`Caller()` adds the file and line that logged each record:
+
+```go
+logger := core.New().
+    Adapter(console.NewWithWriter(os.Stdout, json.NewJsonFormatter())).
+    Caller().
+    MustBuild()
+
+logger.Info("handled")
+// {"time":"...","level":"INFO","message":"handled","caller":"main.go:12"}
+```
+
+It is off by default. Each line walks the stack once to find its caller. The
+first line from a call site resolves it and later lines reuse the result, so
+once a site has logged, its lines allocate nothing. The cache keeps up to
+4,096 call sites per process; a site beyond that is resolved again on each of
+its lines, which allocates. The JSON formatter writes the member shown above
+and the text formatter appends `[main.go:12]`. If you log through your own
+helper functions, `CallerSkip(n)` reports the site that many frames further
+up. Its cost per line is listed under
+[Time, bytes, and allocations](#time-bytes-and-allocations).
+
 ### Using HaloLog from log/slog
 
 Codebases written against the standard library's `slog` can switch backends
@@ -595,7 +619,7 @@ than phuslu on bare messages, 2.2 times at one field, 44% at ten fields, and
 because it does no per-line clock reads and no syscalls on the hot path. The
 full method, fairness notes, and per-platform tables are in
 [benchmarks/comprehensive_comparison.md](benchmarks/comprehensive_comparison.md),
-and every hot path is pinned at 0 allocs/op by eight committed guards
+and every hot path is pinned at 0 allocs/op by ten committed guards
 (`go test ./core -run TestZeroAlloc`).
 
 Compared with its field: masking, rotation, adaptive sampling, alerting,
@@ -603,6 +627,29 @@ field encryption, and file-based configuration ship in the module, where
 most loggers delegate some of these to external packages. That is a scope
 difference, not a value judgment; the numbers above are the like-for-like
 comparison.
+
+### Time, bytes, and allocations
+
+The comparison above reports time. The table below adds bytes and
+allocations per line, measured on windows/amd64 (Go 1.27.1) with the
+benchmark process pinned to one core. Every sample of every row measured
+0 B/op and 0 allocs/op.
+
+| Line | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Bare message | 23.28 | 0 | 0 |
+| One field (typed) | 32.62 | 0 | 0 |
+| Ten fields (typed) | 81.00 | 0 | 0 |
+| Twenty fields (typed) | 130.50 | 0 | 0 |
+| Request-scoped context (5 bound fields + 1 per line) | 33.39 | 0 | 0 |
+| Bare message with `Caller()` | 138.60 | 0 | 0 |
+| One typed field with `Caller()` | 128.30 | 0 | 0 |
+
+A message-only line allocates nothing at any level, whether the logger has
+one or two adapters, masking, sampling, or the text formatter. The
+[benchmark record](benchmarks/comprehensive_comparison.md#time-bytes-and-allocations-on-one-pinned-core)
+has the same run for the other five loggers, every HaloLog benchmark in the
+suite, each logger shape at every level, and the method.
 
 ### Fatal and Panic semantics
 

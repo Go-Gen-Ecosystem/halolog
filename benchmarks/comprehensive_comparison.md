@@ -136,6 +136,91 @@ statistical tie under this document's own sub-5 ns rule. Raw runs: 5 × 1 s
 per scenario, benchstat medians, goos/goarch headers preserved in the
 archived outputs.
 
+## Time, bytes, and allocations on one pinned core
+
+**Measured 2026-09-29 · Go 1.27.1 · windows/amd64 · Intel Core Ultra 9 285HX · process pinned to one core · 10 interleaved samples of 200 ms per scenario · medians**
+
+The 285HX mixes performance and efficiency cores. Unpinned, a benchmark
+process can move between them, and its samples split into two speed modes
+far apart. This run pins the process to one core, which also sets
+GOMAXPROCS=1, so garbage collection shares that core with the logger; that
+weighs on the loggers that allocate. B/op and allocs/op were identical in
+every sample. zap's twenty-field row carries the caveat in Method: its field
+slice is built outside the timed loop.
+
+### The comparison suite
+
+ns/op:
+
+| Scenario | HaloLog | phuslu | zerolog | zap | slog | logrus |
+|---|---:|---:|---:|---:|---:|---:|
+| Bare message | **23.28** | 36.47 | 64.00 | 112.65 | 202.50 | 856.15 |
+| One field (typed) | **32.62** | 41.25 | 73.91 | 203.00 | 336.20 | 1527 |
+| Ten fields (typed) | **81.00** | 84.21 | 134.95 | 444.95 | 1014.5 | 4519 |
+| Twenty fields (typed) | **130.50** | 147.95 | 198.40 | 316.20 | — | — |
+| Request-scoped context | **33.39** | 49.51 | 80.55 | 215.75 | — | — |
+
+B/op and allocs/op:
+
+| Scenario | HaloLog | phuslu | zerolog | zap | slog | logrus |
+|---|---:|---:|---:|---:|---:|---:|
+| Bare message | 0 B, 0 | 0 B, 0 | 0 B, 0 | 0 B, 0 | 0 B, 0 | 792 B, 21 |
+| One field (typed) | 0 B, 0 | 0 B, 0 | 0 B, 0 | 64 B, 1 | 48 B, 1 | 1560 B, 27 |
+| Ten fields (typed) | 0 B, 0 | 0 B, 0 | 0 B, 0 | 704 B, 1 | 688 B, 11 | 3448 B, 64 |
+| Twenty fields (typed) | 0 B, 0 | 0 B, 0 | 0 B, 0 | 0 B, 0 | — | — |
+| Request-scoped context | 0 B, 0 | 0 B, 0 | 0 B, 0 | 64 B, 1 | — | — |
+
+### Every HaloLog benchmark in the suite
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `Info/HaloLog` | 23.28 | 0 | 0 |
+| `OneField/HaloLog_Typed` | 32.62 | 0 | 0 |
+| `OneField/HaloLog_WithField` | 41.36 | 0 | 0 |
+| `TenFields/HaloLog_Typed` | 81.00 | 0 | 0 |
+| `TenFields/HaloLog_WithField` | 112.80 | 0 | 0 |
+| `TwentyFields/HaloLog_Typed` | 130.50 | 0 | 0 |
+| `TwentyFields/HaloLog_WithField` | 196.00 | 0 | 0 |
+| `Keyed_TenFields/Keyed` | 84.44 | 0 | 0 |
+| `Keyed_TenFields/WithField` | 119.30 | 0 | 0 |
+| `Keyed_TwentyFields/Keyed` | 136.35 | 0 | 0 |
+| `Keyed_TwentyFields/WithField` | 234.10 | 0 | 0 |
+| `Defaults/HaloLog_Keyed` | 87.44 | 0 | 0 |
+| `Defaults/HaloLog_Typed` | 101.10 | 0 | 0 |
+| `Defaults/HaloLog_WithField` | 124.75 | 0 | 0 |
+| `Context/HaloLog` (5 bound fields + 1 per line) | 33.39 | 0 | 0 |
+| `Info/HaloLog_DisabledOutput` (no-op sink) | 0.78 | 0 | 0 |
+
+### Message-only lines at every level
+
+Each logger shape logs a bare message at Trace, Debug, Info, Warn, and
+Error, with the output discarded; the ns/op range spans the five levels.
+Medians of 8 samples.
+
+| Logger shape | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| One JSON adapter (direct path) | 22.71–22.87 | 0 | 0 |
+| Text formatter | 27.72–27.88 | 0 | 0 |
+| Sampled (backpressure sampler keeping every line) | 48.59–49.27 | 0 | 0 |
+| Two JSON adapters | 68.38–70.39 | 0 | 0 |
+| Masked (`masking.NewPIIMasker` plus one field rule) | 1554–1575 | 0 | 0 |
+
+`TestZeroAlloc_MessageOnlyEveryLevel` guards every level on these shapes.
+
+### With `Caller()`
+
+| Line | without `Caller()` | with `Caller()` | B/op | allocs/op |
+|---|---:|---:|---:|---:|
+| Bare message, direct JSON path | 23.20 | 138.60 | 0 | 0 |
+| One typed field, direct JSON path | 30.93 | 128.30 | 0 | 0 |
+| Bare message, capture path | 47.80 | 159.85 | 0 | 0 |
+| One typed field, capture path | 47.93 | 164.85 | 0 | 0 |
+
+From `BenchmarkCaller` in `core`, where a test masker forces the capture
+path. Each call site is resolved on its first line, which allocates once;
+later lines reuse it. A site beyond the 4,096-site cache allocates on each of
+its lines.
+
 ## Cross-OS behavior (profiler-verified)
 
 HaloLog avoids a major source of OS-dependent latency: the engine does no

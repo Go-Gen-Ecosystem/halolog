@@ -8,7 +8,7 @@ six-logger field — phuslu/log, zerolog, zap, slog, logrus — in every scenari
 **23.9 ns bare message, 32.0 ns one field, 83.6 ns ten fields (83.1 ns with
 pre-declared keys), 0.83 ns disabled level, 0 B/op and 0 allocs/op throughout.**
 
-Eight committed allocation guards pin the hot paths at zero allocations:
+Ten committed allocation guards pin the hot paths at zero allocations:
 
 ```bash
 go test ./core -run TestZeroAlloc

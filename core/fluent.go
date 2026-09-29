@@ -108,46 +108,49 @@ func (fb FieldBuilder) Err(err error) FieldBuilder {
 // Info logs an info message with the accumulated fields.
 func (fb FieldBuilder) Info(msg string) {
 	if fb.state == nil {
-		fb.logger.Info(msg) // no fields: message-only fast path
+		// No fields: the message-only path, entered through the hot function
+		// exactly as Logger.Info does, so a recorded call site is this
+		// terminal's caller either way.
+		fb.logger.hot.Load().infoFunc(fb.logger, msg)
 		return
 	}
-	dispatchLine(fb.logger, fb.state, fb.epoch, types.InfoLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.InfoLevel, msg, terminalCallerFrames)
 }
 
 // Debug logs a debug message with the accumulated fields.
 func (fb FieldBuilder) Debug(msg string) {
 	if fb.state == nil {
-		fb.logger.Debug(msg)
+		fb.logger.hot.Load().debugFunc(fb.logger, msg)
 		return
 	}
-	dispatchLine(fb.logger, fb.state, fb.epoch, types.DebugLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.DebugLevel, msg, terminalCallerFrames)
 }
 
 // Warn logs a warning message with the accumulated fields.
 func (fb FieldBuilder) Warn(msg string) {
 	if fb.state == nil {
-		fb.logger.Warn(msg)
+		fb.logger.hot.Load().warnFunc(fb.logger, msg)
 		return
 	}
-	dispatchLine(fb.logger, fb.state, fb.epoch, types.WarnLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.WarnLevel, msg, terminalCallerFrames)
 }
 
 // Error logs an error message with the accumulated fields.
 func (fb FieldBuilder) Error(msg string) {
 	if fb.state == nil {
-		fb.logger.Error(msg)
+		fb.logger.hot.Load().errorFunc(fb.logger, msg)
 		return
 	}
-	dispatchLine(fb.logger, fb.state, fb.epoch, types.ErrorLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.ErrorLevel, msg, terminalCallerFrames)
 }
 
 // Trace logs a trace message with the accumulated fields.
 func (fb FieldBuilder) Trace(msg string) {
 	if fb.state == nil {
-		fb.logger.Trace(msg)
+		fb.logger.hot.Load().traceFunc(fb.logger, msg)
 		return
 	}
-	dispatchLine(fb.logger, fb.state, fb.epoch, types.TraceLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.TraceLevel, msg, terminalCallerFrames)
 }
 
 // Fatal logs a fatal message with the accumulated fields, flushes the
@@ -155,18 +158,18 @@ func (fb FieldBuilder) Trace(msg string) {
 // (os.Exit(1) unless overridden in Config).
 func (fb FieldBuilder) Fatal(msg string) {
 	if fb.state == nil {
-		fb.logger.Fatal(msg)
+		fb.logger.hot.Load().fatalFunc(fb.logger, msg)
 		return
 	}
-	dispatchLine(fb.logger, fb.state, fb.epoch, types.FatalLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.FatalLevel, msg, terminalCallerFrames)
 }
 
 // Panic logs a panic message with the accumulated fields, then panics with
 // the message.
 func (fb FieldBuilder) Panic(msg string) {
 	if fb.state == nil {
-		fb.logger.Panic(msg)
+		fb.logger.hot.Load().panicFunc(fb.logger, msg)
 		return
 	}
-	dispatchLine(fb.logger, fb.state, fb.epoch, types.PanicLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.PanicLevel, msg, terminalCallerFrames)
 }

@@ -318,85 +318,83 @@ func (fb TypedFieldBuilder) Any(key *types.FieldKey, value interface{}) TypedFie
 	return fb
 }
 
+// Terminals without fields enter the message-only path through the hot
+// function, exactly as Logger.Info does, so a recorded call site is this
+// terminal's caller either way.
+
 // Info logs an info message with the accumulated typed fields.
 func (fb TypedFieldBuilder) Info(msg string) {
 	if fb.state == nil {
-		fb.logger.Info(msg)
+		fb.logger.hot.Load().infoFunc(fb.logger, msg)
 		return
 	}
-	fb.dispatch(types.InfoLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.InfoLevel, msg, terminalCallerFrames)
 }
 
 // Debug logs a debug message with the accumulated typed fields.
 func (fb TypedFieldBuilder) Debug(msg string) {
 	if fb.state == nil {
-		fb.logger.Debug(msg)
+		fb.logger.hot.Load().debugFunc(fb.logger, msg)
 		return
 	}
-	fb.dispatch(types.DebugLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.DebugLevel, msg, terminalCallerFrames)
 }
 
 // Warn logs a warning message with the accumulated typed fields.
 func (fb TypedFieldBuilder) Warn(msg string) {
 	if fb.state == nil {
-		fb.logger.Warn(msg)
+		fb.logger.hot.Load().warnFunc(fb.logger, msg)
 		return
 	}
-	fb.dispatch(types.WarnLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.WarnLevel, msg, terminalCallerFrames)
 }
 
 // Error logs an error message with the accumulated typed fields.
 func (fb TypedFieldBuilder) Error(msg string) {
 	if fb.state == nil {
-		fb.logger.Error(msg)
+		fb.logger.hot.Load().errorFunc(fb.logger, msg)
 		return
 	}
-	fb.dispatch(types.ErrorLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.ErrorLevel, msg, terminalCallerFrames)
 }
 
 // Trace logs a trace message with the accumulated typed fields.
 func (fb TypedFieldBuilder) Trace(msg string) {
 	if fb.state == nil {
-		fb.logger.Trace(msg)
+		fb.logger.hot.Load().traceFunc(fb.logger, msg)
 		return
 	}
-	fb.dispatch(types.TraceLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.TraceLevel, msg, terminalCallerFrames)
 }
 
 // Fatal logs a fatal message with the accumulated typed fields, flushes the
 // adapters, and terminates the process via the logger's exit function.
 func (fb TypedFieldBuilder) Fatal(msg string) {
 	if fb.state == nil {
-		fb.logger.Fatal(msg)
+		fb.logger.hot.Load().fatalFunc(fb.logger, msg)
 		return
 	}
-	fb.dispatch(types.FatalLevel, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.FatalLevel, msg, terminalCallerFrames)
 }
 
 // Panic logs a panic message with the accumulated typed fields, then panics
 // with the message.
 func (fb TypedFieldBuilder) Panic(msg string) {
 	if fb.state == nil {
-		fb.logger.Panic(msg)
+		fb.logger.hot.Load().panicFunc(fb.logger, msg)
 		return
 	}
-	fb.dispatch(types.PanicLevel, msg)
-}
-
-// dispatch renders the accumulated fields through the pooled per-P entry and
-// returns the state to the pool. Passing the pooled (already heap-resident)
-// entry to the adapter's WriteZero interface method keeps dispatch
-// zero-allocation.
-func (fb TypedFieldBuilder) dispatch(level types.LogLevel, msg string) {
-	dispatchLine(fb.logger, fb.state, fb.epoch, level, msg)
+	dispatchLine(fb.logger, fb.state, fb.epoch, types.PanicLevel, msg, terminalCallerFrames)
 }
 
 // dispatchLine renders the accumulated line and returns the state to the pool.
 // It is the single dispatch point shared by the classic FieldBuilder, the
 // typed builder, and the level-first Line API, so level filtering, sampling,
 // masking, metrics, terminal-level semantics, and state release are enforced
-// identically for every fluent API.
-func dispatchLine(l *Logger, s *perPState, epoch uint32, level types.LogLevel, msg string) {
+// identically for every fluent API. frames counts the frames between
+// dispatchLine and the application's logging call (terminalCallerFrames or
+// messageCallerFrames); it is read only when the logger records call sites.
+func dispatchLine(l *Logger, s *perPState, epoch uint32, level types.LogLevel, msg string, frames int) {
 	// Stale-builder guard: the state was already dispatched and recycled
 	// (documented misuse: two terminals on one builder). Touching it now
 	// would corrupt whoever owns it next — make the call a no-op instead.
@@ -416,6 +414,9 @@ func dispatchLine(l *Logger, s *perPState, epoch uint32, level types.LogLevel, m
 	// guarantees masking and sampling are off, so no transform is skipped.
 	if f := s.directJSON; f != nil {
 		line := f.AppendHeader(s.lineBuf[:0], l.clock.GetNsecValue(), level, msg)
+		if l.recordCaller {
+			line = append(line, callerMember(l.callSiteAt(frames))...) // rendered once per site
+		}
 		if len(l.boundBytes) > 0 {
 			line = append(line, l.boundBytes...) // whole bound context: one memcpy
 		}
@@ -443,6 +444,13 @@ func dispatchLine(l *Logger, s *perPState, epoch uint32, level types.LogLevel, m
 			return
 		}
 
+		// The call site is resolved after sampling, so a dropped line pays no
+		// stack walk; formatters render it from File/Line (see AppendCaller).
+		if l.recordCaller {
+			site := l.callSiteAt(frames)
+			entry.File, entry.Line = site.File, site.Line
+		}
+
 		if l.enableMasking && l.masker != nil {
 			l.masker.Apply(entry)
 		}
@@ -456,6 +464,10 @@ func dispatchLine(l *Logger, s *perPState, epoch uint32, level types.LogLevel, m
 			for _, a := range l.adapters {
 				_ = a.WriteZero(entry)
 			}
+		}
+
+		if l.recordCaller {
+			entry.File, entry.Line = "", 0 // the pooled entry must not carry the site on
 		}
 
 		if l.metrics != nil {

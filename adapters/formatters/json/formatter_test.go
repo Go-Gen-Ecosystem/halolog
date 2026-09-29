@@ -772,3 +772,25 @@ func TestFormat_ZeroAllocation(t *testing.T) {
 		t.Fatalf("CRITICAL: Zero-allocation guarantee violated - got %.2f allocs/op", allocs)
 	}
 }
+
+// TestAppendCaller_EscapesTheFileName pins that the caller member stays valid
+// JSON whatever the file is called: the name is escaped like any string, and
+// either path separator ends the directory part.
+func TestAppendCaller_EscapesTheFileName(t *testing.T) {
+	cases := map[string]string{
+		"/src/app/main.go":   `,"caller":"main.go:7"`,
+		`C:\src\app\main.go`: `,"caller":"main.go:7"`,
+		`/src/app/we"ird.go`: `,"caller":"we\"ird.go:7"`,
+		"/src/app/tab\t.go":  `,"caller":"tab\t.go:7"`,
+	}
+	for file, want := range cases {
+		got := string(AppendCaller(nil, file, 7))
+		if got != want {
+			t.Errorf("AppendCaller(%q) = %s, want %s", file, got, want)
+		}
+		entry := &types.LogEntry{Level: types.InfoLevel, Message: "m", File: file, Line: 7}
+		if line := NewJsonFormatter().Format(entry, nil); !json.Valid(line) {
+			t.Errorf("Format with File %q produced invalid JSON: %s", file, line)
+		}
+	}
+}

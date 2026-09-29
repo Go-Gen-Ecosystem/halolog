@@ -184,11 +184,17 @@ func (ln Line) Msg(msg string) {
 	if ln.s == nil || ln.s.epoch != ln.epoch {
 		return
 	}
-	dispatchLine(ln.s.owner, ln.s, ln.epoch, ln.s.lineLevel, msg)
+	dispatchLine(ln.s.owner, ln.s, ln.epoch, ln.s.lineLevel, msg, terminalCallerFrames)
 }
 
-// Send completes the line with an empty message.
-func (ln Line) Send() { ln.Msg("") }
+// Send completes the line with an empty message. It dispatches directly
+// rather than through Msg, so a recorded call site is Send's caller.
+func (ln Line) Send() {
+	if ln.s == nil || ln.s.epoch != ln.epoch {
+		return
+	}
+	dispatchLine(ln.s.owner, ln.s, ln.epoch, ln.s.lineLevel, "", terminalCallerFrames)
+}
 
 // keyName returns the raw name of a pre-declared key (nil-safe).
 func keyName(key *types.FieldKey) string {
