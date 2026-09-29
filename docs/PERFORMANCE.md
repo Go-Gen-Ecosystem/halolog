@@ -3,10 +3,10 @@
 HaloLog's performance claims are measured, committed, and reproducible — never
 aspirational. The canonical numbers, method, and fairness notes live in
 [`benchmarks/comprehensive_comparison.md`](../benchmarks/comprehensive_comparison.md);
-as of 2026-08-26 (Go 1.27.0, linux/amd64, benchstat medians) HaloLog leads a
+as of 2026-09-29 (Go 1.27.1, linux/amd64, medians of 10 runs) HaloLog leads a
 six-logger field — phuslu/log, zerolog, zap, slog, logrus — in every scenario:
-**23.9 ns bare message, 32.0 ns one field, 83.6 ns ten fields (83.1 ns with
-pre-declared keys), 0.83 ns disabled level, 0 B/op and 0 allocs/op throughout.**
+**22.6 ns bare message, 33.7 ns one field, 79.4 ns ten fields (80.0 ns with
+pre-declared keys), 0.58 ns disabled level, 0 B/op and 0 allocs/op throughout.**
 
 Ten committed allocation guards pin the hot paths at zero allocations:
 

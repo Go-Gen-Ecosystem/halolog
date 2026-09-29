@@ -6,19 +6,19 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.24+-blue.svg)](https://golang.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![Performance](https://img.shields.io/badge/bare%20message-23.9%20ns%2Fop-red.svg)](benchmarks/comprehensive_comparison.md)
+[![Performance](https://img.shields.io/badge/bare%20message-22.6%20ns%2Fop-red.svg)](benchmarks/comprehensive_comparison.md)
 [![Zero Allocation](<https://img.shields.io/badge/allocation-zero%20(0%20B%2Fop)-brightgreen.svg>)](docs/PERFORMANCE.md)
 
 HaloLog is a structured logging library for Go built around a zero-allocation
-hot path. It logs a full JSON line in 23.9 ns on the benchmark host, roughly
-42 million lines per second on one goroutine, and allocates nothing while
+hot path. It logs a full JSON line in 22.6 ns on the benchmark host, roughly
+44 million lines per second on one goroutine, and allocates nothing while
 doing it. The allocation claim is not a slogan: committed guard tests fail
 the build if any hot path ever allocates.
 
 ## Features
 
-- **Zero-allocation hot path.** 23.9 ns/op for a bare message and 0 B/op in
-  every measured scenario, enforced by eight committed guard tests.
+- **Zero-allocation hot path.** 22.6 ns/op for a bare message and 0 B/op in
+  every measured scenario, enforced by ten committed guard tests.
 - **Structured logging** with typed field methods and automatic inference.
 - **Output adapters** for console, file with rotation, HTTP batching, syslog,
   and a lock-free async ring, plus an interface for custom destinations.
@@ -593,8 +593,8 @@ export HALOLOG_FILE_PATH=/var/log/myapp.log
 
 ## Benchmarks
 
-Measured on Go 1.27.0, linux/amd64 (the CI environment; Intel Core Ultra 9
-285HX), 5 runs of 1 s each, benchstat medians. Every logger writes a full
+Measured on Go 1.27.1, linux/amd64 (the CI environment; Intel Core Ultra 9
+285HX), 10 runs of 1 s each, medians. Every logger writes a full
 structured JSON line (timestamp, level, message, fields) to `io.Discard`
 through the committed, fairness-audited comparison suite in `benchmarks/`,
 which includes phuslu/log, the fastest logger on public Go leaderboards.
@@ -602,20 +602,20 @@ Run it yourself; numbers vary by machine.
 
 ```
                         HaloLog   phuslu   zerolog     zap     slog   logrus
-Bare message            23.9 ns   63.1 ns   86.8 ns  146.2 ns  280.3  1395 ns
-One field (typed)       32.0 ns   69.9 ns   99.5 ns  183.7 ns  312.9  1486 ns
-Ten fields (typed)      83.6 ns  120.7 ns  201.7 ns  437.4 ns  992.9  4066 ns
-Ten fields (keyed)      83.1 ns        —        —        —        —       —
-Twenty fields (typed)  146.0 ns  179.9 ns  230.6 ns  394.6 ns      —       —
-Disabled level         0.83 ns         —        —        —        —       —
+Bare message            22.6 ns   61.3 ns   85.8 ns  142.2 ns  230.3  911.2 ns
+One field (typed)       33.7 ns   65.3 ns   95.8 ns  176.4 ns  307.5  1357 ns
+Ten fields (typed)      79.4 ns  106.6 ns  150.2 ns  383.0 ns  873.0  3660 ns
+Ten fields (keyed)      80.0 ns        —        —        —        —       —
+Twenty fields (typed)  128.2 ns  174.3 ns  210.8 ns  338.3 ns      —       —
+Disabled level         0.58 ns         —        —        —        —       —
 HaloLog allocations    0 B/op, 0 allocs/op in every scenario
 ```
 
 The honest summary: HaloLog wins every published scenario in the six-logger
 Linux comparison and the three-logger Windows head-to-head, at 0 allocs/op,
-with fully escaped keys and never-interleaved lines. It is 2.6 times faster
-than phuslu on bare messages, 2.2 times at one field, 44% at ten fields, and
-23% at twenty on Linux. HaloLog avoids a major source of OS-dependent latency
+with fully escaped keys and never-interleaved lines. It is 2.7 times faster
+than phuslu on bare messages, 1.9 times at one field, 34% at ten fields, and
+36% at twenty on Linux. HaloLog avoids a major source of OS-dependent latency
 because it does no per-line clock reads and no syscalls on the hot path. The
 full method, fairness notes, and per-platform tables are in
 [benchmarks/comprehensive_comparison.md](benchmarks/comprehensive_comparison.md),
