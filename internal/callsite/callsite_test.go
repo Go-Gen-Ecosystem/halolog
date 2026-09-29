@@ -31,6 +31,21 @@ func TestLookupResolvesOnceAndShares(t *testing.T) {
 }
 
 //go:noinline
+func callerOf(skip int) *Site { return Caller(skip) }
+
+func TestCallerSkip(t *testing.T) {
+	_, file, marker, _ := runtime.Caller(0)
+	if site := callerOf(0); site.File != file || site.Line != marker+1 {
+		t.Fatalf("Caller(0) = %s:%d, want %s:%d", site.File, site.Line, file, marker+1)
+	}
+	for _, skip := range []int{-1, MaxSkip + 1} {
+		if site := callerOf(skip); site != unknown {
+			t.Fatalf("Caller(%d) = %+v, want the zero site", skip, site)
+		}
+	}
+}
+
+//go:noinline
 func memberSite() uintptr {
 	var pcs [1]uintptr
 	runtime.Callers(1, pcs[:])

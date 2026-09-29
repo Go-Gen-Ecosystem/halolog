@@ -18,6 +18,8 @@ package types
 
 import (
 	"sync"
+
+	"github.com/go-gen-ecosystem/halolog/internal/callsite"
 )
 
 /* =====================================================================
@@ -50,25 +52,18 @@ func NewLogEntry(level LogLevel, message string) *LogEntry {
 	}
 }
 
-// NewLogEntryWithCaller creates a new log entry with caller information
+// NewLogEntryWithCaller creates a pooled log entry that records where it was
+// called from: skip 0 is the function calling NewLogEntryWithCaller, and each
+// further step climbs one frame. A skip outside [0, 64], or a frame the
+// runtime cannot place, leaves File and Line empty. Sites resolve once and are
+// cached, shared with loggers built with core's Builder.Caller.
 func NewLogEntryWithCaller(level LogLevel, message string, skip int) *LogEntry {
-	entry := LogEntryPool.Get().(*LogEntry)
-	entry.Timestamp = globalEntryClock.now()
+	entry := AcquireLogEntry() // a pooled entry reset to a clean state
 	entry.Level = level
 	entry.Message = message
-	entry.Component = ""
-	entry.Fields = nil
-	entry.Context = nil
-	entry.Error = nil
-	entry.IndexedStore = nil
-	entry.UseIndexedStorage = false
-
-	// Get caller info if GetHighPerformanceCallerInfo is available
-	// Otherwise just leave File and Line empty
-	entry.File = ""
-	entry.Line = 0
-	entry.Caller = nil
-
+	site := callsite.Caller(skip)
+	entry.File = site.File
+	entry.Line = site.Line
 	return entry
 }
 

@@ -65,8 +65,9 @@ All notable changes to HaloLog are documented here. This project adheres to
   loggers without it do no stack walk, and filtered or sampled-out lines
   return before it; Fatal and Panic keep their terminal behaviour at every
   level threshold. The JSON formatter now also escapes
-  the caller's file name, so an unusual name cannot produce an invalid line.
-  Requested in #6.
+  the caller's file name, so an unusual name cannot produce an invalid line,
+  and `types.NewLogEntryWithCaller` now records the location it is called
+  from, through the same call-site cache. Requested in #6.
 
 ### Corrected dependency and validation
 - Require HaloLog core v1.0.2, making field-name and regex masking contracts

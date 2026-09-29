@@ -15,6 +15,9 @@ func TestZeroAlloc_WarmLookupAndMember(t *testing.T) {
 	if allocs := testing.AllocsPerRun(1000, func() { Lookup(pc).Member(render) }); allocs != 0 {
 		t.Fatalf("a warm lookup and member must allocate 0 times/op, got %.2f", allocs)
 	}
+	if allocs := testing.AllocsPerRun(1000, func() { callerOf(0) }); allocs != 0 {
+		t.Fatalf("a warm Caller must allocate 0 times/op, got %.2f", allocs)
+	}
 }
 
 // Past the retention ceiling a site is resolved again on every lookup: the

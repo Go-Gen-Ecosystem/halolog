@@ -13,7 +13,9 @@
 // limitations under the License.
 
 // Package callsite resolves logging call sites once and caches them by
-// return program counter, for core's Builder.Caller.
+// return program counter. core's Builder.Caller and
+// types.NewLogEntryWithCaller both use it, so they report a location the
+// same way and share one cache.
 //
 // The first sighting of a PC resolves it through the runtime (CallersFrames
 // owns the return-PC adjustment and inlined frames); that is the only
@@ -34,10 +36,14 @@ const (
 	// resolved again on each lookup (allocating) instead of retained.
 	maxSites = 4096
 
-	// MaxSkip bounds how far callers may climb above a call site: a deeper
-	// chain is a configuration error, and the bound keeps frame arithmetic far
-	// from integer overflow.
+	// MaxSkip bounds how far callers may ask Caller to climb: a deeper chain
+	// is a configuration error, and the bound keeps frame arithmetic far from
+	// integer overflow.
 	MaxSkip = 64
+
+	// callerFrames is what runtime.Callers skips inside Caller to reach the
+	// caller of Caller's caller: runtime.Callers, Caller, and that caller.
+	callerFrames = 3
 )
 
 // Site is one resolved call site, immutable once published and shared by
@@ -86,6 +92,18 @@ func resolve(pc uintptr) *Site {
 		return v.(*Site)
 	}
 	return site
+}
+
+// Caller returns the site skip frames above the function calling Caller:
+// skip 0 is that function's caller. A skip outside [0, MaxSkip] yields the
+// zero Site.
+func Caller(skip int) *Site {
+	var pcs [1]uintptr
+	if skip < 0 || skip > MaxSkip {
+		return unknown
+	}
+	runtime.Callers(callerFrames+skip, pcs[:])
+	return Lookup(pcs[0])
 }
 
 // Retained reports how many sites are cached.
