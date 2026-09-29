@@ -8,6 +8,53 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-29
+
+### Added
+- **Call-site capture: `Builder.Caller()`.** A logger built with `Caller()`
+  (or `Config.EnableCaller`) records where each line was logged, as
+  `"caller":"file.go:42"`: the member the JSON formatter already renders for
+  an entry that carries a location. The direct path copies that member,
+  rendered once per call site, and the capture path fills `File`/`Line`, so
+  both stay byte-identical; the text formatter and `otelbridge` read the same
+  fields. Message-only lines, `Line`, `Typed()` and `WithField` terminals,
+  bound children, and Fatal/Panic all report the line that logged, and
+  `CallerSkip(n)` moves the site up for applications that log through their
+  own helpers. Each line walks the stack once; the first line from a call
+  site resolves and renders it, later lines reuse the result, so a site's
+  lines allocate nothing once it has logged (`TestZeroAlloc_Caller`). The
+  cache keeps up to 4,096 call sites per process; a site past that limit is
+  resolved again on each of its lines, which allocates. Off by default:
+  loggers without it do no stack walk, and filtered or sampled-out lines
+  return before it; Fatal and Panic keep their terminal behaviour at every
+  level threshold. The JSON formatter now also escapes
+  the caller's file name, so an unusual name cannot produce an invalid line,
+  and `types.NewLogEntryWithCaller` now records the location it is called
+  from, through the same call-site cache. Requested in #6.
+
+### Fixed
+- **Message-only lines allocate nothing at every level, on every dispatch
+  shape.** Trace, Debug, Warn, and Error lines on loggers with plain
+  adapters, every level on masked or sampled loggers, and every level on a
+  raw-capable adapter whose formatter has no direct JSON encoder (the text
+  formatter, for one) built a 1.4 KB entry on the stack and handed it to an
+  interface, which moved it to the heap on each line. They now borrow the
+  pooled entry Info already used, or take the pooled capture path.
+  `TestZeroAlloc_MessageOnlyEveryLevel` guards the level-by-shape matrix.
+- `pool.ReleaseEntry` now clears everything a line may leave on an entry:
+  source location, caller, error, context and its count, and indexed
+  storage, not only the message and fields. A message-only line fills in
+  just its level, message, component, and time, so an entry released with a
+  location or an error could otherwise carry them into an unrelated line.
+- A child logger on a raw-capable adapter whose formatter has no direct JSON
+  encoder now keeps its bound context on message-only lines, not only on
+  lines with fields.
+
+## otelbridge — released as otelbridge/v1.0.3 (2026-09-22)
+
+The OpenTelemetry bridge is a separate module with its own tags. These
+entries shipped in its releases up to otelbridge/v1.0.3.
+
 ### Added
 - **`otelbridge.NewAdapter` — logs out to OpenTelemetry.** An output adapter
   emitting each entry into the OpenTelemetry Logs API, so a line can reach an
@@ -48,26 +95,6 @@ All notable changes to HaloLog are documented here. This project adheres to
   provider shutdown remains the caller's responsibility. Adds
   `go.opentelemetry.io/otel/log` to the `otelbridge` module only; the core
   logger's dependencies are unchanged.
-- **Call-site capture: `Builder.Caller()`.** A logger built with `Caller()`
-  (or `Config.EnableCaller`) records where each line was logged, as
-  `"caller":"file.go:42"`: the member the JSON formatter already renders for
-  an entry that carries a location. The direct path copies that member,
-  rendered once per call site, and the capture path fills `File`/`Line`, so
-  both stay byte-identical; the text formatter and `otelbridge` read the same
-  fields. Message-only lines, `Line`, `Typed()` and `WithField` terminals,
-  bound children, and Fatal/Panic all report the line that logged, and
-  `CallerSkip(n)` moves the site up for applications that log through their
-  own helpers. Each line walks the stack once; the first line from a call
-  site resolves and renders it, later lines reuse the result, so a site's
-  lines allocate nothing once it has logged (`TestZeroAlloc_Caller`). The
-  cache keeps up to 4,096 call sites per process; a site past that limit is
-  resolved again on each of its lines, which allocates. Off by default:
-  loggers without it do no stack walk, and filtered or sampled-out lines
-  return before it; Fatal and Panic keep their terminal behaviour at every
-  level threshold. The JSON formatter now also escapes
-  the caller's file name, so an unusual name cannot produce an invalid line,
-  and `types.NewLogEntryWithCaller` now records the location it is called
-  from, through the same call-site cache. Requested in #6.
 
 ### Corrected dependency and validation
 - Require HaloLog core v1.0.2, making field-name and regex masking contracts
@@ -79,24 +106,6 @@ All notable changes to HaloLog are documented here. This project adheres to
 - Add published/local dependency gates on Go 1.24 and stable, real-SDK
   context-sensitive filtering, negative controls, lifecycle/backpressure tests,
   and separate uninstrumented allocation contracts.
-
-### Fixed
-- **Message-only lines allocate nothing at every level, on every dispatch
-  shape.** Trace, Debug, Warn, and Error lines on loggers with plain
-  adapters, every level on masked or sampled loggers, and every level on a
-  raw-capable adapter whose formatter has no direct JSON encoder (the text
-  formatter, for one) built a 1.4 KB entry on the stack and handed it to an
-  interface, which moved it to the heap on each line. They now borrow the
-  pooled entry Info already used, or take the pooled capture path.
-  `TestZeroAlloc_MessageOnlyEveryLevel` guards the level-by-shape matrix.
-- `pool.ReleaseEntry` now clears everything a line may leave on an entry:
-  source location, caller, error, context and its count, and indexed
-  storage, not only the message and fields. A message-only line fills in
-  just its level, message, component, and time, so an entry released with a
-  location or an error could otherwise carry them into an unrelated line.
-- A child logger on a raw-capable adapter whose formatter has no direct JSON
-  encoder now keeps its bound context on message-only lines, not only on
-  lines with fields.
 
 ## [1.0.2] - 2026-09-16
 
