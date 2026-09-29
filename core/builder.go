@@ -18,6 +18,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/go-gen-ecosystem/halolog/adapters/outputs/discard"
 	"github.com/go-gen-ecosystem/halolog/types"
 )
@@ -126,6 +128,27 @@ func (b *Builder) Alerts() *Builder {
 // Aggregation enables log aggregation.
 func (b *Builder) Aggregation() *Builder {
 	b.config.EnableAggregation = true
+	return b
+}
+
+// Caller records where each line was logged, as the member
+// "caller":"file.go:42". Off by default: it adds one stack walk per line.
+// Once a call site has logged, its lines allocate nothing, for up to 4096
+// call sites per process; a site past that is resolved on each line.
+func (b *Builder) Caller() *Builder {
+	b.config.EnableCaller = true
+	return b
+}
+
+// CallerSkip records the call site skip frames further up, for applications
+// that log through their own helper functions. It must be within [0, 64];
+// Build reports anything else.
+func (b *Builder) CallerSkip(skip int) *Builder {
+	if skip < 0 || skip > maxCallerSkip {
+		b.errors = append(b.errors, fmt.Errorf("core: CallerSkip(%d) is outside [0, %d]", skip, maxCallerSkip))
+		return b
+	}
+	b.config.CallerSkip = skip
 	return b
 }
 

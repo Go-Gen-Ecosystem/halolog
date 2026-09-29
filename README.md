@@ -171,6 +171,29 @@ logger.DebugLine().WithString("dump", expensive()).Msg("trace") // ~1ns when Deb
 
 \* that is the level check itself; argument evaluation is still yours to guard.
 
+### Recording the call site
+
+`Caller()` adds the file and line that logged each record:
+
+```go
+logger := core.New().
+    Adapter(console.NewWithWriter(os.Stdout, json.NewJsonFormatter())).
+    Caller().
+    MustBuild()
+
+logger.Info("handled")
+// {"time":"...","level":"INFO","message":"handled","caller":"main.go:12"}
+```
+
+It is off by default. Each line walks the stack once to find its caller. The
+first line from a call site resolves it and later lines reuse the result, so
+once a site has logged, its lines allocate nothing. The cache keeps up to
+4,096 call sites per process; a site beyond that is resolved again on each of
+its lines, which allocates. The JSON formatter writes the member shown above
+and the text formatter appends `[main.go:12]`. If you log through your own
+helper functions, `CallerSkip(n)` reports the site that many frames further
+up.
+
 ### Using HaloLog from log/slog
 
 Codebases written against the standard library's `slog` can switch backends
