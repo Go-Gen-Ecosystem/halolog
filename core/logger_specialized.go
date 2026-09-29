@@ -63,35 +63,35 @@ func (l *Logger) infoNoMaskMulti(l2 *Logger, msg string) {
 }
 
 func (l *Logger) infoMaskOne(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.InfoLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
-	_ = l.adapters[0].WriteZero(&entry)
+	l.masker.Apply(entry)
+	_ = l.adapters[0].WriteZero(entry)
 	if l.metrics != nil {
 		l.metrics.counts[types.InfoLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) infoMaskMulti(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.InfoLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
+	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(&entry)
+		_ = a.WriteZero(entry)
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.InfoLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 // =============================================================================
@@ -99,65 +99,65 @@ func (l *Logger) infoMaskMulti(l2 *Logger, msg string) {
 // =============================================================================
 
 func (l *Logger) debugNoMaskOne(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.DebugLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	_ = l.adapters[0].WriteZero(&entry)
+	_ = l.adapters[0].WriteZero(entry)
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) debugNoMaskMulti(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.DebugLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
 	for _, a := range l.adapters {
-		_ = a.WriteZero(&entry)
+		_ = a.WriteZero(entry)
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) debugMaskOne(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.DebugLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
-	_ = l.adapters[0].WriteZero(&entry)
+	l.masker.Apply(entry)
+	_ = l.adapters[0].WriteZero(entry)
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) debugMaskMulti(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.DebugLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
+	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(&entry)
+		_ = a.WriteZero(entry)
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 // =============================================================================
@@ -165,65 +165,65 @@ func (l *Logger) debugMaskMulti(l2 *Logger, msg string) {
 // =============================================================================
 
 func (l *Logger) warnNoMaskOne(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.WarnLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	_ = l.adapters[0].WriteZero(&entry)
+	_ = l.adapters[0].WriteZero(entry)
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) warnNoMaskMulti(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.WarnLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
 	for _, a := range l.adapters {
-		_ = a.WriteZero(&entry)
+		_ = a.WriteZero(entry)
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) warnMaskOne(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.WarnLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
-	_ = l.adapters[0].WriteZero(&entry)
+	l.masker.Apply(entry)
+	_ = l.adapters[0].WriteZero(entry)
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) warnMaskMulti(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.WarnLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
+	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(&entry)
+		_ = a.WriteZero(entry)
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 // =============================================================================
@@ -231,63 +231,63 @@ func (l *Logger) warnMaskMulti(l2 *Logger, msg string) {
 // =============================================================================
 
 func (l *Logger) errorNoMaskOne(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.ErrorLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	_ = l.adapters[0].WriteZero(&entry)
+	_ = l.adapters[0].WriteZero(entry)
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) errorNoMaskMulti(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.ErrorLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
 	for _, a := range l.adapters {
-		_ = a.WriteZero(&entry)
+		_ = a.WriteZero(entry)
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) errorMaskOne(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.ErrorLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
-	_ = l.adapters[0].WriteZero(&entry)
+	l.masker.Apply(entry)
+	_ = l.adapters[0].WriteZero(entry)
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) errorMaskMulti(l2 *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.ErrorLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	l.masker.Apply(&entry)
+	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(&entry)
+		_ = a.WriteZero(entry)
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)
 	}
+	pool.ReleaseEntry(entry)
 }

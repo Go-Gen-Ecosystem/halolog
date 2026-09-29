@@ -25,6 +25,7 @@ import (
 	jsonfmt "github.com/go-gen-ecosystem/halolog/adapters/formatters/json"
 	"github.com/go-gen-ecosystem/halolog/adapters/outputs/discard"
 	"github.com/go-gen-ecosystem/halolog/cache"
+	"github.com/go-gen-ecosystem/halolog/pool"
 	"github.com/go-gen-ecosystem/halolog/types"
 )
 
@@ -541,13 +542,13 @@ func (l *Logger) writeEntry(entry *types.LogEntry) {
 }
 
 func (l *Logger) realTrace(_ *Logger, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = types.TraceLevel
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
-	l.writeEntry(&entry)
+	l.writeEntry(entry)
+	pool.ReleaseEntry(entry)
 }
 
 // realFatal writes the fatal line, flushes every adapter so the line is not
@@ -592,18 +593,14 @@ func (l *Logger) exit(code int) {
 // logDirect renders a message-only line straight to bytes: fused header +
 // closer into the pooled line buffer, one WriteRaw. No LogEntry is built.
 // The encoder is re-queried per line (a lock-free atomic load on the console
-// adapter), so a runtime formatter swap to a non-JSON formatter safely falls
-// back to the generic capture path.
+// adapter), so a formatter without a direct JSON encoder (a text or custom
+// formatter, or a runtime swap to one) takes the pooled capture path instead:
+// captureState prepends any bound context and dispatchLine writes the line.
 func (l *Logger) logDirect(level types.LogLevel, msg string) {
 	enc, _ := l.directAdapter.DirectEncoder().(*jsonfmt.Formatter)
 	if enc == nil {
-		var entry types.LogEntry
-		entry.Level = level
-		entry.Message = msg
-		entry.Component = l.component
-		entry.TimestampUnix = l.clock.GetNsecValue()
-		entry.StaticFieldCount = 0
-		l.writeEntry(&entry)
+		s := captureState(l)
+		dispatchLine(l, s, s.epoch, level, msg)
 		return
 	}
 	s := globalPerPPool.get()
@@ -650,17 +647,16 @@ func (l *Logger) panicBound(_ *Logger, msg string) { l.logBoundCapture(types.Pan
 // logSampled is the generic dispatch used when sampling is on: build the
 // entry, consult the sampler, then write. Fatal/Panic never route here.
 func (l *Logger) logSampled(level types.LogLevel, msg string) {
-	var entry types.LogEntry
+	entry := pool.AcquireEntry()
 	entry.Level = level
 	entry.Message = msg
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
-	entry.StaticFieldCount = 0
 
-	if !l.sampler.ShouldSample(&entry) {
-		return
+	if l.sampler.ShouldSample(entry) {
+		l.writeEntry(entry)
 	}
-	l.writeEntry(&entry)
+	pool.ReleaseEntry(entry)
 }
 
 func (l *Logger) traceSampled(_ *Logger, msg string) { l.logSampled(types.TraceLevel, msg) }

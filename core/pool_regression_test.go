@@ -2,8 +2,11 @@
 package core
 
 import (
+	"errors"
+	"runtime"
 	"testing"
 
+	"github.com/go-gen-ecosystem/halolog/pool"
 	"github.com/go-gen-ecosystem/halolog/types"
 )
 
@@ -31,5 +34,53 @@ func TestPerPPool_StaticFieldsNotShrunkAcrossReuse(t *testing.T) {
 	logger.WithField("a", 1).WithField("b", 2).WithField("c", 3).WithField("d", 4).Info("four")
 	if got != 4 {
 		t.Fatalf("four-field entry after reuse: StaticFieldCount = %d, want 4 (fields were dropped)", got)
+	}
+}
+
+// metadataProbe records the per-line metadata of every entry it receives.
+type metadataProbe struct {
+	file     string
+	line     int
+	err      error
+	errorMsg string
+	caller   any
+	context  int
+}
+
+func (p *metadataProbe) Name() string                  { return "metadata-probe" }
+func (p *metadataProbe) Write(e *types.LogEntry) error { return p.WriteZero(e) }
+func (p *metadataProbe) WriteZero(e *types.LogEntry) error {
+	p.file, p.line, p.err, p.errorMsg = e.File, e.Line, e.Error, e.ErrorMsg
+	p.caller, p.context = e.Caller, len(e.Context)
+	return nil
+}
+func (p *metadataProbe) Flush() error                 { return nil }
+func (p *metadataProbe) Close() error                 { return nil }
+func (p *metadataProbe) Health() error                { return nil }
+func (p *metadataProbe) SetFormatter(types.Formatter) {}
+
+// TestMessageOnlyLinesDoNotInheritPooledMetadata guards the shared entry pool
+// contract on the message-only paths: an entry another user filled with a
+// source location, an error, and context, then released, must reach the next
+// line clean. GOMAXPROCS(1) keeps the same P, so the next borrow gets it back.
+func TestMessageOnlyLinesDoNotInheritPooledMetadata(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	p := &metadataProbe{}
+	l := NewLogger(Config{Level: types.TraceLevel, Adapters: []types.Adapter{p}})
+	for _, level := range []struct {
+		name string
+		log  func(string)
+	}{{"trace", l.Trace}, {"debug", l.Debug}, {"info", l.Info}, {"warn", l.Warn}, {"error", l.Error}} {
+		e := pool.AcquireEntry()
+		e.File, e.Line = "private-tenant-path.go", 417
+		e.Error, e.ErrorMsg = errors.New("private-tenant-error"), "private-tenant-error"
+		e.Caller = "private-tenant-caller"
+		e.Context = []types.TypedFieldData{{Key: "tenant_secret", Value: "private-value"}}
+		pool.ReleaseEntry(e)
+		level.log("fresh event")
+		if p.file != "" || p.line != 0 || p.err != nil || p.errorMsg != "" || p.caller != nil || p.context != 0 {
+			t.Errorf("%s inherited metadata: file=%q line=%d err=%v msg=%q caller=%v context=%d",
+				level.name, p.file, p.line, p.err, p.errorMsg, p.caller, p.context)
+		}
 	}
 }

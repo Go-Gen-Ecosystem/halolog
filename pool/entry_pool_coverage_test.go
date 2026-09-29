@@ -17,6 +17,7 @@
 package pool
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -62,6 +63,39 @@ func TestEntryPool_ReleaseClearsSensitiveFields(t *testing.T) {
 	}
 	if entry.StaticFieldCount != 0 {
 		t.Errorf("StaticFieldCount not reset, got %d", entry.StaticFieldCount)
+	}
+}
+
+// TestEntryPool_ReleaseClearsLineMetadata pins that a released entry keeps
+// nothing a later borrower could emit as its own: message-only log paths fill
+// in only the level, message, component, and time of a pooled entry.
+func TestEntryPool_ReleaseClearsLineMetadata(t *testing.T) {
+	entry := GlobalPool.AcquireEntry()
+	entry.File = "private-tenant-path.go"
+	entry.Line = 417
+	entry.Caller = "private-tenant-caller"
+	entry.Error = errors.New("private-tenant-error")
+	entry.ErrorMsg = "private-tenant-error"
+	entry.Context = []types.TypedFieldData{{Key: "tenant_secret", Value: "private-value"}}
+	entry.StaticContextCount = 1
+	entry.LocationLen = 9
+	entry.BaseName = "private.go"
+	entry.UseIndexedStorage = true
+	context := entry.Context
+
+	GlobalPool.ReleaseEntry(entry)
+
+	if entry.File != "" || entry.Line != 0 || entry.Caller != nil {
+		t.Errorf("source location kept: file=%q line=%d caller=%v", entry.File, entry.Line, entry.Caller)
+	}
+	if entry.Error != nil || entry.ErrorMsg != "" {
+		t.Errorf("error kept: err=%v msg=%q", entry.Error, entry.ErrorMsg)
+	}
+	if len(entry.Context) != 0 || entry.StaticContextCount != 0 || context[0] != (types.TypedFieldData{}) {
+		t.Errorf("context kept: len=%d count=%d slot=%+v", len(entry.Context), entry.StaticContextCount, context[0])
+	}
+	if entry.LocationLen != 0 || entry.BaseName != "" || entry.UseIndexedStorage {
+		t.Errorf("location cache or indexed flag kept: len=%d base=%q indexed=%v", entry.LocationLen, entry.BaseName, entry.UseIndexedStorage)
 	}
 }
 

@@ -140,6 +140,9 @@ func (p *EntryPool) ReleaseEntry(entry *types.LogEntry) {
 	for i := 0; i < len(entry.StaticContext); i++ {
 		entry.StaticContext[i] = types.TypedFieldData{}
 	}
+	for i := 0; i < len(entry.Context); i++ {
+		entry.Context[i] = types.TypedFieldData{}
+	}
 
 	// Reset standard fields
 	entry.Message = ""
@@ -151,6 +154,23 @@ func (p *EntryPool) ReleaseEntry(entry *types.LogEntry) {
 	entry.StaticFieldCount = 0
 	entry.Fields = entry.Fields[:0]
 	entry.StaticContext = entry.StaticContext[:0]
+
+	// Reset everything else a previous line may have set. Message-only log
+	// paths borrow an entry and fill in only the level, message, component,
+	// and time, so a leftover source location, error, or context would be
+	// written as part of their line. Reset clears the error, the context, the
+	// counts, and the overflow flags; the rest is cleared here.
+	entry.Reset()
+	entry.File = ""
+	entry.Line = 0
+	entry.Caller = nil
+	entry.LocationLen = 0
+	entry.BaseName = ""
+	if entry.IndexedStore != nil {
+		entry.IndexedStore.Reset()
+		entry.IndexedStore = nil
+	}
+	entry.UseIndexedStorage = false
 
 	p.counters.release.Add(1)
 	p.counters.active.Add(-1)
