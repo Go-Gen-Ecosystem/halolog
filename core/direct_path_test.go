@@ -148,3 +148,45 @@ func (s *noRecordRaw) SetFormatter(types.Formatter)            {}
 func (s *noRecordRaw) Health() error                           { return nil }
 func (s *noRecordRaw) WriteRaw([]byte) error                   { return nil }
 func (s *noRecordRaw) DirectEncoder() types.DirectFieldEncoder { return s.enc }
+
+// fieldRecorder is a raw-capable adapter whose formatter offers no direct JSON
+// encoder (as with a text or custom formatter). It records the field keys of
+// every captured entry, which is what such a formatter would render.
+type fieldRecorder struct{ lines [][]string }
+
+func (r *fieldRecorder) Name() string                            { return "fieldrecorder" }
+func (r *fieldRecorder) Write(e *types.LogEntry) error           { return r.WriteZero(e) }
+func (r *fieldRecorder) Flush() error                            { return nil }
+func (r *fieldRecorder) Close() error                            { return nil }
+func (r *fieldRecorder) SetFormatter(types.Formatter)            {}
+func (r *fieldRecorder) Health() error                           { return nil }
+func (r *fieldRecorder) WriteRaw([]byte) error                   { return nil }
+func (r *fieldRecorder) DirectEncoder() types.DirectFieldEncoder { return nil }
+func (r *fieldRecorder) WriteZero(e *types.LogEntry) error {
+	var keys []string
+	for i := 0; i < e.StaticFieldCount && i < len(e.StaticFields); i++ {
+		keys = append(keys, e.StaticFields[i].Key)
+	}
+	r.lines = append(r.lines, keys)
+	return nil
+}
+
+// TestBoundContextOnNonJSONDirectFallback pins that a child logger keeps its
+// bound context on message-only lines when the adapter is raw-capable but its
+// formatter has no direct JSON encoder: the fallback must take the pooled
+// capture path (which prepends bound fields), not build a bare entry.
+func TestBoundContextOnNonJSONDirectFallback(t *testing.T) {
+	rec := &fieldRecorder{}
+	child := NewLogger(Config{Component: "guard", Level: types.InfoLevel, Adapters: []types.Adapter{rec}}).
+		With().WithString("request_id", "req-42").Logger()
+	child.Info("message only")
+	child.Typed().WithInt("status", 200).Info("with field")
+	if len(rec.lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(rec.lines))
+	}
+	for i, keys := range rec.lines {
+		if len(keys) == 0 || keys[0] != "request_id" {
+			t.Fatalf("line %d lost its bound context: keys=%v", i, keys)
+		}
+	}
+}

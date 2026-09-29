@@ -60,6 +60,24 @@ All notable changes to HaloLog are documented here. This project adheres to
   context-sensitive filtering, negative controls, lifecycle/backpressure tests,
   and separate uninstrumented allocation contracts.
 
+### Fixed
+- **Message-only lines allocate nothing at every level, on every dispatch
+  shape.** Trace, Debug, Warn, and Error lines on loggers with plain
+  adapters, every level on masked or sampled loggers, and every level on a
+  raw-capable adapter whose formatter has no direct JSON encoder (the text
+  formatter, for one) built a 1.4 KB entry on the stack and handed it to an
+  interface, which moved it to the heap on each line. They now borrow the
+  pooled entry Info already used, or take the pooled capture path.
+  `TestZeroAlloc_MessageOnlyEveryLevel` guards the level-by-shape matrix.
+- `pool.ReleaseEntry` now clears everything a line may leave on an entry:
+  source location, caller, error, context and its count, and indexed
+  storage, not only the message and fields. A message-only line fills in
+  just its level, message, component, and time, so an entry released with a
+  location or an error could otherwise carry them into an unrelated line.
+- A child logger on a raw-capable adapter whose formatter has no direct JSON
+  encoder now keeps its bound context on message-only lines, not only on
+  lines with fields.
+
 ## [1.0.2] - 2026-09-16
 
 ### Fixed
