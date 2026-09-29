@@ -108,9 +108,10 @@ func (f *Formatter) Format(entry *types.LogEntry, dst []byte) []byte {
 	// the direct-append fast path uses, so both paths stay byte-identical.
 	dst = appendHeaderWith(dst, f.appendHeader, entryUnixNanos(entry), entry.Level, entry.Message)
 
-	// Caller (FIXED: Cross-platform)
+	// Caller — the same member the direct path copies from core's call-site
+	// cache, so both paths stay byte-identical.
 	if entry.Line >= 0 && entry.File != "" {
-		dst = f.formatCaller(dst, entry)
+		dst = AppendCaller(dst, entry.File, entry.Line)
 	}
 
 	// Fields — WithField stores into StaticFields (the fast path); the dynamic
@@ -129,21 +130,20 @@ func (f *Formatter) Format(entry *types.LogEntry, dst []byte) []byte {
 	return append(dst, '}', '\n')
 }
 
-// FIXED: Cross-platform basename
-func (f *Formatter) formatCaller(dst []byte, entry *types.LogEntry) []byte {
-	dst = append(dst, `,"caller":"`...)
-
-	file := entry.File
+// AppendCaller appends the `,"caller":"file.go:42"` member: the base name of
+// file (either path separator) and the line. The name is escaped like any JSON
+// string, so an unusual file name cannot break the line.
+func AppendCaller(dst []byte, file string, line int) []byte {
 	for i := len(file) - 1; i >= 0; i-- {
-		if file[i] == '/' || file[i] == '\\' { // FIXED: Both separators
+		if file[i] == '/' || file[i] == '\\' {
 			file = file[i+1:]
 			break
 		}
 	}
-
-	dst = append(dst, file...)
+	dst = append(dst, `,"caller":"`...)
+	dst = appendJSONString(dst, file)
 	dst = append(dst, ':')
-	dst = appendInt(dst, int64(entry.Line))
+	dst = appendInt(dst, int64(line))
 	return append(dst, '"')
 }
 
