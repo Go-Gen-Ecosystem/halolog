@@ -23,6 +23,16 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: stable
+      # goreleaser diffs the changelog against the nearest tag of any kind,
+      # which can be another module's (otelbridge/v*). Name the previous
+      # release tag of this module instead; a first release has none.
+      - name: Find the previous release tag
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            echo "GORELEASER_PREVIOUS_TAG=$prev" >> "$GITHUB_ENV"
+          fi
+          echo "previous release tag: ${prev:-none}"
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           version: latest
