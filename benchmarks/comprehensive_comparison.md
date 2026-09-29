@@ -1,6 +1,6 @@
 # HaloLog — Comprehensive Multi-Logger Benchmark Comparison
 
-**Measured 2026-08-26 · Go 1.27.0 · Intel Core Ultra 9 285HX · 5 runs × 1 s per scenario · benchstat medians**
+**Measured 2026-09-29 · Go 1.27.1 · linux/amd64 (WSL2) · Intel Core Ultra 9 285HX · 10 runs × 1 s per scenario · medians**
 
 This document is the canonical, reproducible record of HaloLog's standing
 against the major Go structured loggers. It supersedes every earlier results
@@ -19,10 +19,11 @@ core and measured internal prototypes that no longer exist.
 - The field includes **phuslu/log v1.0.128** — the fastest logger on public Go
   leaderboards — because a speed claim that never races the champion is not a
   claim.
-- 5 runs × 1 s each, summarized with `benchstat` (medians). Single machine;
+- 10 runs × 1 s each, in two sweeps of five, summarized as medians. Single machine;
   expect ±10–15% run-to-run drift and treat sub-5 ns deltas as ties.
 - Linux numbers come from linux/amd64 (WSL2) — the CI environment; Windows
-  numbers from windows/amd64 on the same hardware. Orderings agree.
+  numbers from windows/amd64 on the same hardware, one pinned core. Orderings
+  agree.
 
 Known biases, disclosed: HaloLog serializes writes behind a mutex (lines never
 interleave) while zerolog and phuslu write unlocked — a safety cost HaloLog
@@ -39,89 +40,89 @@ zap slightly. `HaloLog_DisabledOutput` rows measure the no-op sink and are
 
 | Logger | ns/op | allocs | vs HaloLog |
 |---|---:|---:|---:|
-| **HaloLog** | **23.9** | 0 B, 0 | — |
-| phuslu/log | 63.1 | 0 B, 0 | 2.6× slower |
-| zerolog | 86.8 | 0 B, 0 | 3.6× slower |
-| zap | 146.2 | 0 B, 0 | 6.1× slower |
-| slog (stdlib JSON) | 280.3 | 0 B, 0 | 11.7× slower |
-| logrus | 1395 | 797 B, 21 | 58× slower |
+| **HaloLog** | **22.6** | 0 B, 0 | — |
+| phuslu/log | 61.3 | 0 B, 0 | 2.7× slower |
+| zerolog | 85.8 | 0 B, 0 | 3.8× slower |
+| zap | 142.2 | 0 B, 0 | 6.3× slower |
+| slog (stdlib JSON) | 230.3 | 0 B, 0 | 10.2× slower |
+| logrus | 911.2 | 796 B, 21 | 40× slower |
 
-23.9 ns/op ≈ **42 million JSON log lines per second, single goroutine**.
+22.6 ns/op ≈ **44 million JSON log lines per second, single goroutine**.
 
 ### One field (string)
 
 | Logger | ns/op | allocs |
 |---|---:|---:|
-| **HaloLog (typed)** | **32.0** | 0 B, 0 |
-| HaloLog (WithField) | 40.1 | 0 B, 0 |
-| phuslu/log | 69.9 | 0 B, 0 |
-| zerolog | 99.5 | 0 B, 0 |
-| zap | 183.7 | 64 B, 1 |
-| slog | 312.9 | 48 B, 1 |
-| logrus | 1486 | 1.5 KiB, 27 |
+| **HaloLog (typed)** | **33.7** | 0 B, 0 |
+| HaloLog (WithField) | 42.1 | 0 B, 0 |
+| phuslu/log | 65.3 | 0 B, 0 |
+| zerolog | 95.8 | 0 B, 0 |
+| zap | 176.4 | 64 B, 1 |
+| slog | 307.5 | 48 B, 1 |
+| logrus | 1357 | 1.5 KiB, 27 |
 
 ### Ten fields (int)
 
 | Logger | ns/op | allocs |
 |---|---:|---:|
-| **HaloLog (pre-declared keys)** | **83.1** | 0 B, 0 |
-| **HaloLog (typed, plain keys)** | **83.6** | 0 B, 0 |
-| HaloLog (WithField) | 113.6 | 0 B, 0 |
-| phuslu/log | 120.7 | 0 B, 0 |
-| zerolog | 201.7 | 0 B, 0 |
-| zap | 437.4 | 706 B, 1 |
-| slog | 992.9 | 689 B, 11 |
-| logrus | 4066 | 3.4 KiB, 64 |
+| **HaloLog (typed, plain keys)** | **79.4** | 0 B, 0 |
+| **HaloLog (pre-declared keys)** | **80.0** | 0 B, 0 |
+| phuslu/log | 106.6 | 0 B, 0 |
+| HaloLog (WithField) | 115.1 | 0 B, 0 |
+| zerolog | 150.2 | 0 B, 0 |
+| zap | 383.0 | 706 B, 1 |
+| slog | 873.0 | 689 B, 11 |
+| logrus | 3660 | 3.4 KiB, 64 |
 
 The fused single-pass key emit made escaped plain keys as fast as
-pre-declared ones (83.6 vs 83.1 ns) — key safety now costs effectively
-nothing on clean keys. Even the legacy `WithField` interface API beats every
-competitor.
+pre-declared ones (79.4 vs 80.0 ns) — key safety now costs effectively
+nothing on clean keys. The legacy `WithField` interface API trails phuslu at
+ten fields and beats the other four loggers.
 
 ### Twenty fields (int)
 
 | Logger | ns/op | allocs |
 |---|---:|---:|
-| **HaloLog (typed)** | **146.0** | 0 B, 0 |
-| phuslu/log | 179.9 | 0 B, 0 |
-| HaloLog (WithField) | 206.8 | 0 B, 0 |
-| zerolog | 230.6 | 0 B, 0 |
-| zap (fields prebuilt) | 394.6 | 0 B, 0 |
+| **HaloLog (typed)** | **128.2** | 0 B, 0 |
+| phuslu/log | 174.3 | 0 B, 0 |
+| HaloLog (WithField) | 195.5 | 0 B, 0 |
+| zerolog | 210.8 | 0 B, 0 |
+| zap (fields prebuilt) | 338.3 | 0 B, 0 |
 
 ### Disabled level (not comparable to output rows)
 
 | | ns/op |
 |---|---:|
-| HaloLog, level filtered | 0.83 |
+| HaloLog, level filtered | 0.58 |
 
-## Results — windows/amd64 (same hardware, same day, final code, same run)
+## Results — windows/amd64 (same hardware, one pinned core)
 
-| Scenario | HaloLog | phuslu | zerolog² |
+From the 2026-09-29 run on one pinned core; the six-logger tables with bytes
+and allocations are in
+[Time, bytes, and allocations on one pinned core](#time-bytes-and-allocations-on-one-pinned-core).
+
+| Scenario | HaloLog | phuslu | zerolog |
 |---|---:|---:|---:|
-| Bare message | **26.6** | 46.2 | 62.8 |
-| One field (typed) | **42.1** | 46.0 | 75.5 |
-| Ten fields (typed) | **99.2** | 103.2 | 132.6 |
-| Twenty fields (typed) | **162.6** | 176.3 | 200.0 |
-
-² zerolog column from the same-day full Windows sweep; HaloLog/phuslu from
-their same-run head-to-head after the fused key emit landed.
+| Bare message | **23.28** | 36.47 | 64.00 |
+| One field (typed) | **32.62** | 41.25 | 73.91 |
+| Ten fields (typed) | **81.00** | 84.21 | 134.95 |
+| Twenty fields (typed) | **130.50** | 147.95 | 198.40 |
 
 ## Request-scoped context (5 bound fields + 1 call-site field)
 
-Measured on windows/amd64, same hardware, same-day run as the Windows
-head-to-head above. Each logger uses its idiomatic bound-context API and
-emits the full record per line (`benchmarks/context_bench_test.go`).
+Measured on linux/amd64 in the canonical run above. Each logger uses its
+idiomatic bound-context API and emits the full record per line
+(`benchmarks/context_bench_test.go`).
 
 | Logger | ns/op | allocs | mechanism |
 |---|---:|---:|---|
-| **HaloLog `With().Logger()`** | **37.4** | 0 B, 0 | context pre-encoded once → one memcpy per line |
-| phuslu Context | 54.5 | 0 B, 0 | pre-encoded context bytes |
-| zerolog `With().Logger()` | 90.8 | 0 B, 0 | context bytes copied per event |
-| zap `With(...)` | 180.5 | 64 B, 1 | cloned encoder + per-line field encode |
+| **HaloLog `With().Logger()`** | **32.8** | 0 B, 0 | context pre-encoded once → one memcpy per line |
+| phuslu Context | 72.7 | 0 B, 0 | pre-encoded context bytes |
+| zerolog `With().Logger()` | 95.8 | 0 B, 0 | context bytes copied per event |
+| zap `With(...)` | 180.9 | 64 B, 1 | cloned encoder + per-line field encode |
 
-The 2026-08-28 quiet-host rerun measured the same scenario at 33.3 ns on
-linux/amd64 and 34.4 ns on windows/amd64 for HaloLog, orderings unchanged
-(see Reproduction below).
+On windows/amd64 with one pinned core the same scenario measured 33.39 ns for
+HaloLog (below).
 
 ## Reproduction — 2026-08-28, quiet host, v1.0.1 as published
 
@@ -225,10 +226,10 @@ its lines.
 
 HaloLog avoids a major source of OS-dependent latency: the engine does no
 per-line wall-clock read and no syscalls (one atomic load of the cached clock,
-then a fused header memcpy). On this host its bare-message result moved from
-23.9 ns on Linux to 26.6 ns on Windows; benchmark latency is not literally
-platform-invariant. phuslu
-swings ~30% between OSes because ~39% of its line is per-line timestamp
+then a fused header memcpy). On this host its bare-message result is 22.6 ns
+on Linux and 23.28 ns on Windows (one pinned core); benchmark latency is not
+literally platform-invariant. phuslu swings ~40% between OSes (61.3 ns on
+Linux, 36.47 ns on Windows) because ~39% of its line is per-line timestamp
 acquisition + formatting (its own CPU profile) and Windows' time source is
 far cheaper than Linux's vDSO `clock_gettime`. That Windows tailwind — plus
 phuslu not escaping field keys at all (hostile keys break its JSON) —
@@ -239,15 +240,15 @@ last two cells while keeping keys fully escaped.
 ## Verdict
 
 - **HaloLog wins every published scenario in these measurements.** In the
-  six-logger Linux table: 2.6×/2.2× over phuslu at zero/one field, **44% faster at
-  ten fields** (83.6 vs 120.7), 23% at twenty (146.0 vs 179.9). Windows
-  three-logger head-to-head: 26.6 vs 46.2 bare, 99.2 vs 103.2 at ten,
-  162.6 vs 176.3 at twenty.
+  six-logger Linux table: 2.7×/1.9× over phuslu at zero/one field, **34% faster at
+  ten fields** (79.4 vs 106.6), 36% at twenty (128.2 vs 174.3). Windows, one
+  pinned core: 23.28 vs 36.47 bare, 81.00 vs 84.21 at ten, 130.50 vs 147.95 at
+  twenty.
 - 0 B/op, 0 allocs/op in every HaloLog scenario, with fully escaped keys
   and never-interleaved lines — correctness guarantees the closest rival
   does not offer.
-- zerolog is beaten 1.6–3.6× everywhere. zap, slog, and logrus are not
-  close (4–58× slower, and all three allocate once fields appear).
+- zerolog is beaten 1.6–3.8× everywhere. zap, slog, and logrus are not
+  close (4.8–46× slower, and all three allocate once fields appear).
 
 ## Why these numbers moved — the three optimizations (2026-08-26)
 
@@ -310,11 +311,14 @@ with the experiment flag gone.
 
 ```bash
 cd benchmarks
-go test -bench='BenchmarkInfo$|BenchmarkOneField$|BenchmarkTenFields$|BenchmarkTwentyFields$|BenchmarkKeyed_TenFields$' \
-  -benchmem -benchtime=1s -run='^$' -count=5 . | tee results.txt
+go test -bench='BenchmarkInfo$|BenchmarkOneField$|BenchmarkTenFields$|BenchmarkTwentyFields$|BenchmarkKeyed_TenFields$|BenchmarkContext$' \
+  -benchmem -benchtime=1s -run='^$' -count=10 . | tee results.txt
 go run golang.org/x/perf/cmd/benchstat@latest results.txt
+cd .. && go test -bench='BenchmarkLoggerInfoDisabled$' -benchtime=1s -run='^$' -count=10 ./core
 ```
 
-The scenario definitions live in `comparison_bench_test.go` (six loggers) and
-`keyed_bench_test.go` (pre-declared-key variants). CI runs the allocation
+The scenario definitions live in `comparison_bench_test.go` (six loggers),
+`keyed_bench_test.go` (pre-declared-key variants), and `context_bench_test.go`
+(request-scoped context); the disabled-level row is `core`'s
+`BenchmarkLoggerInfoDisabled`. CI runs the allocation
 guards and reports these numbers per commit via `.github/workflows/bench.yml`.
