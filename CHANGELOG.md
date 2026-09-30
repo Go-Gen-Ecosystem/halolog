@@ -8,6 +8,25 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Fixed
+- **The file adapter writes while it is open, keeps every rotated line, and
+  no longer stalls.** Reported by @softexpert in #12. A `RotationConfig` that
+  set only some fields left `BatchTimeout` at zero, so the writer never took a
+  line and the file stayed empty until `Close`; zero tuning fields now take
+  their `DefaultRotationConfig` values, and `QueueSize`, which was ignored,
+  bounds the queue. Rotated files were named to the second, so rotations in
+  the same second overwrote one another and their compressions raced; names
+  now carry milliseconds and a counter (`app.log.2006-01-02T15-04-05.000`),
+  and one goroutine compresses and prunes backups in order. The fixed
+  65,536-slot queue dropped lines longer than 4 KiB, stalled after a single
+  overflow until another full lap, and its writer polled in a loop; a bounded
+  double-buffered queue replaces it, whose writer sleeps until lines arrive,
+  so an idle adapter uses no CPU and about 5 MB instead of about 270 MB. A
+  full queue makes `Write` wait up to `WriteTimeout` before dropping a line,
+  a failed rotation keeps writing to the current file instead of discarding
+  the batch, `Close` writes every queued line, and `Flush` returns once the
+  queued lines are on disk.
+
 ## [1.1.0] - 2026-09-29
 
 ### Added

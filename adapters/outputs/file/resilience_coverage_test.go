@@ -17,6 +17,9 @@
 package file
 
 import (
+	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -224,48 +227,35 @@ func TestBufferPools_TierSelection(t *testing.T) {
 }
 
 // ============================================================================
-// Ring buffer edge cases
+// Queue edge cases (the long-line, bounded-queue, and overflow cases are in
+// reliability_regression_test.go)
 // ============================================================================
 
-func TestRingBuffer_RejectsOversizedWrite(t *testing.T) {
-	rb := &ringBuffer{}
-
-	// A payload larger than maxSlotSize is rejected outright.
-	oversized := make([]byte, maxSlotSize+1)
-	if rb.TryWrite(oversized) {
-		t.Error("TryWrite should reject payloads larger than maxSlotSize")
+// Flush returns only once every queued line is in the file, in queue order.
+func TestQueue_FlushWritesLinesInOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "order.log")
+	adapter, err := NewFileAdapter(path, nil)
+	if err != nil {
+		t.Fatalf("NewFileAdapter: %v", err)
 	}
-}
+	defer func() { _ = adapter.Close() }()
 
-func TestRingBuffer_WriteThenConsume(t *testing.T) {
-	rb := &ringBuffer{}
-
-	payload := []byte("hello ring")
-	if !rb.TryWrite(payload) {
-		t.Fatal("TryWrite of a small payload should succeed")
+	for i := range 3 {
+		if err := adapter.Write(newTestEntry(fmt.Sprintf("order seq=%d", i))); err != nil {
+			t.Fatalf("Write %d: %v", i, err)
+		}
+	}
+	if err := adapter.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
 	}
 
-	batch := make([][]byte, 4)
-	n := rb.ConsumeInto(batch, 20*time.Millisecond)
-	if n != 1 {
-		t.Fatalf("expected to consume 1 entry, got %d", n)
+	var order []string
+	for _, line := range readAllLines(t, path) {
+		if i := strings.Index(line, "order seq="); i >= 0 {
+			order = append(order, line[i:])
+		}
 	}
-	if string(batch[0]) != "hello ring" {
-		t.Errorf("consumed payload = %q, want %q", batch[0], "hello ring")
-	}
-}
-
-func TestRingBuffer_ConsumeEmptyTimesOut(t *testing.T) {
-	rb := &ringBuffer{}
-	batch := make([][]byte, 2)
-
-	// No data enqueued: ConsumeInto spins until the deadline and returns 0.
-	start := time.Now()
-	n := rb.ConsumeInto(batch, 15*time.Millisecond)
-	if n != 0 {
-		t.Errorf("expected 0 consumed from empty ring, got %d", n)
-	}
-	if time.Since(start) < 10*time.Millisecond {
-		t.Error("ConsumeInto should respect the maxWait deadline on an empty ring")
+	if want := []string{"order seq=0", "order seq=1", "order seq=2"}; strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("after Flush the file holds %q, want %q", order, want)
 	}
 }
