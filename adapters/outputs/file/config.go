@@ -20,25 +20,28 @@ import (
 	"time"
 )
 
-// RotationConfig defines file rotation and performance settings
+// RotationConfig defines file rotation and performance settings. A partial
+// config is fine: a zero FlushInterval, MaxBatchSize, WriteTimeout,
+// QueueSize, CircuitThreshold, or CircuitTimeout takes the value
+// DefaultRotationConfig gives it. The other fields keep their zero meaning.
 type RotationConfig struct {
-	MaxSize          int64
-	MaxAge           time.Duration
-	MaxBackups       int
-	Compress         bool
-	LocalTime        bool
-	FlushInterval    time.Duration
-	MaxBatchSize     int
-	BatchTimeout     time.Duration
-	WriteTimeout     time.Duration
-	QueueSize        int
-	UseOSync         bool
-	UseFlock         bool
-	EnableMetrics    bool
-	EnableBufferPool bool
-	CircuitThreshold int
-	CircuitTimeout   time.Duration
-	RateLimit        int64
+	MaxSize          int64         // bytes before the file rotates; 0 never rotates
+	MaxAge           time.Duration // backups older than this many whole days are removed; under a day keeps them
+	MaxBackups       int           // backups kept; 0 keeps every backup
+	Compress         bool          // gzip rotated files
+	LocalTime        bool          // currently unused: backup names use local time
+	FlushInterval    time.Duration // how often the file is synced to disk
+	MaxBatchSize     int           // initial size of the queue buffer, in bytes
+	BatchTimeout     time.Duration // unused: the writer wakes as soon as a line is queued
+	WriteTimeout     time.Duration // how long Write waits for room in a full queue before dropping the line
+	QueueSize        int           // lines that may wait to be written
+	UseOSync         bool          // open the file with O_SYNC
+	UseFlock         bool          // hold a cross-process lock on the file
+	EnableMetrics    bool          // currently unused: metrics are always kept
+	EnableBufferPool bool          // currently unused
+	CircuitThreshold int           // consecutive write failures that open the circuit breaker
+	CircuitTimeout   time.Duration // how long an open circuit drops writes before retrying
+	RateLimit        int64         // lines per second; 0 disables the limit
 }
 
 // DefaultRotationConfig returns production-ready defaults
@@ -62,6 +65,33 @@ func DefaultRotationConfig() *RotationConfig {
 		CircuitTimeout:   30 * time.Second,
 		RateLimit:        0, // Disabled by default
 	}
+}
+
+// withDefaults returns a copy of c in which every zero tuning field takes its
+// DefaultRotationConfig value. A zero queue size, write timeout, or circuit
+// setting cannot work, and partial configs are common, so they are filled in
+// rather than used as given. A nil config yields the defaults.
+func withDefaults(c *RotationConfig) RotationConfig {
+	def := DefaultRotationConfig()
+	if c == nil {
+		return *def
+	}
+	out := *c
+	out.FlushInterval = orDefault(out.FlushInterval, def.FlushInterval)
+	out.MaxBatchSize = orDefault(out.MaxBatchSize, def.MaxBatchSize)
+	out.WriteTimeout = orDefault(out.WriteTimeout, def.WriteTimeout)
+	out.QueueSize = orDefault(out.QueueSize, def.QueueSize)
+	out.CircuitThreshold = orDefault(out.CircuitThreshold, def.CircuitThreshold)
+	out.CircuitTimeout = orDefault(out.CircuitTimeout, def.CircuitTimeout)
+	return out
+}
+
+// orDefault returns v, or def when v is zero or negative.
+func orDefault[T ~int | ~int64](v, def T) T {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 // FileConfig provides high-level configuration for the file adapter.

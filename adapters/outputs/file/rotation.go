@@ -18,12 +18,15 @@ package file
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,61 +38,83 @@ func (f *FileAdapter) shouldRotate(additionalBytes int64) bool {
 	return f.currentSize.Load()+additionalBytes > f.maxSize
 }
 
-// rotateLocked performs rotation (caller must hold batchMu)
+// rotateLocked renames the log file to a unique backup name, opens a fresh
+// file, and queues the backup for compression and cleanup. If the rename
+// fails, the log path is reopened so writing can go on. It runs on the writer
+// goroutine.
 func (f *FileAdapter) rotateLocked() error {
 	f.metrics.RotationsTotal.Add(1)
 
+	backup, err := f.swapFile()
+	if err != nil {
+		return err
+	}
+	f.compressor.Add(backup)
+	return nil
+}
+
+// swapFile closes the current file, renames it to a backup name, and opens a
+// new file at the log path.
+func (f *FileAdapter) swapFile() (string, error) {
 	f.fileMu.Lock()
 	defer f.fileMu.Unlock()
 
-	// Close current file
 	if f.currentFile != nil {
 		_ = f.currentFile.Close()
 		f.currentFile = nil
 	}
 
-	// Rename with timestamp
-	backupName := f.path + "." + time.Now().Format("2006-01-02T15-04-05")
-	if err := os.Rename(f.path, backupName); err != nil {
-		return fmt.Errorf("failed to rename log file: %w", err)
+	backup := f.backupName(time.Now())
+	if err := os.Rename(f.path, backup); err != nil {
+		if openErr := f.openFile(); openErr != nil {
+			return "", fmt.Errorf("failed to rename log file: %w; reopening it failed: %w", err, openErr)
+		}
+		return "", fmt.Errorf("failed to rename log file: %w", err)
 	}
 
-	// Open new file
 	if err := f.openFile(); err != nil {
-		return fmt.Errorf("failed to open new log file: %w", err)
+		return "", fmt.Errorf("failed to open new log file: %w", err)
 	}
-
-	// Async compression and cleanup, tracked so Close waits for it. An
-	// untracked goroutine here raced shutdown: the process (or a test's temp
-	// dir) could tear the backup file down while compression was mid-read.
-	f.wg.Add(1)
-	go func() {
-		defer f.wg.Done()
-		f.rotateAsync(backupName)
-	}()
-
-	return nil
+	return backup, nil
 }
 
-// rotateAsync handles compression and cleanup
+// backupName returns a rotated-file name no existing backup uses: the log path
+// plus a millisecond timestamp, and a counter when two rotations share one.
+func (f *FileAdapter) backupName(now time.Time) string {
+	base := f.path + "." + now.Format("2006-01-02T15-04-05.000")
+	name := base
+	for i := 1; pathExists(name) || pathExists(name+".gz"); i++ {
+		name = base + "-" + strconv.Itoa(i)
+	}
+	return name
+}
+
+func pathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// rotateAsync compresses one rotated file and then removes backups beyond the
+// retention limits. It runs on the compressor goroutine.
 func (f *FileAdapter) rotateAsync(backupFile string) {
 	// Compress if enabled
 	if f.compress {
 		compressed := backupFile + ".gz"
-		if err := compressFile(backupFile, compressed); err != nil {
-			_, _ = os.Stderr.WriteString("Compression failed: ")
-			_, _ = os.Stderr.WriteString(err.Error())
-			_, _ = os.Stderr.WriteString("\n")
-		} else {
+		err := compressFile(backupFile, compressed)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			// When rotations outpace compression, retention can remove a
+			// backup before its turn comes; there is nothing left to compress.
+		case err != nil:
+			reportError("Compression failed", err)
+		default:
 			_ = os.Remove(backupFile)
 		}
 	}
 
 	// Cleanup old backups
 	if err := f.cleanupOldBackups(); err != nil {
-		_, _ = os.Stderr.WriteString("Cleanup failed: ")
-		_, _ = os.Stderr.WriteString(err.Error())
-		_, _ = os.Stderr.WriteString("\n")
+		reportError("Cleanup failed", err)
 	}
 }
 
@@ -178,4 +203,35 @@ func (f *FileAdapter) cleanupOldBackups() error {
 	}
 
 	return nil
+}
+
+// compressor runs rotated files through compression and retention on its own
+// goroutine, one file at a time and in rotation order, so no two ever touch
+// the same file.
+type compressor struct {
+	files chan string
+	done  sync.WaitGroup
+}
+
+func newCompressor(queueSize int, process func(backup string)) *compressor {
+	c := &compressor{files: make(chan string, queueSize)}
+	c.done.Add(1)
+	go func() {
+		defer c.done.Done()
+		for backup := range c.files {
+			process(backup)
+		}
+	}()
+	return c
+}
+
+// Add queues a rotated file, waiting while the queue is full.
+func (c *compressor) Add(backup string) {
+	c.files <- backup
+}
+
+// Close processes the files already queued, then stops.
+func (c *compressor) Close() {
+	close(c.files)
+	c.done.Wait()
 }
