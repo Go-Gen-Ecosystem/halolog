@@ -8,6 +8,8 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-09-30
+
 ### Fixed
 - **The file adapter writes while it is open, keeps every rotated line, and
   no longer stalls.** Reported by @softexpert in #12. A `RotationConfig` that
