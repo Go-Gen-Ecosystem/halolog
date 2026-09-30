@@ -368,11 +368,13 @@ adapter := console.New()                          // writes to os.Stdout
 ```go
 import "github.com/go-gen-ecosystem/halolog/adapters/outputs/file"
 
-adapter, _ := file.NewFileAdapter("app.log", &file.RotationConfig{
-    MaxSize:    100 * 1024 * 1024, // 100MB
-    MaxBackups: 10,
-    Compress:   true,
-})
+cfg := file.DefaultRotationConfig() // 100 MiB files, up to 10 backups for 7 days, gzip
+cfg.MaxBackups = 30                 // change only what you need; MaxSize is in bytes
+adapter, err := file.NewFileAdapter("app.log", cfg)
+if err != nil {
+    return err
+}
+defer adapter.Close() // writes every queued line, then syncs the file
 ```
 
 ### HTTP/webhook
