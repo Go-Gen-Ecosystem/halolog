@@ -8,6 +8,34 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Added
+- `http.ErrHTTPClosed`, `http.ErrHTTPBufferFull`, and
+  `http.ErrHTTPUndelivered`.
+
+### Fixed
+- **The HTTP adapter keeps every line it accepts, and reports the ones it
+  cannot deliver.** It kept the logger's entries past `Write`, but the logger
+  reuses an entry as soon as `Write` returns, so batched lines arrived
+  duplicated or empty; `Write` now formats the entry into a bounded queue and
+  keeps nothing. A failed batch lost every line behind it; it is now retried,
+  in order, with exponential backoff, and only a batch the endpoint rejects
+  with a 4xx other than 408 or 429 is dropped. Messages, field keys, and
+  values are escaped as the JSON formatter escapes them, so a backslash or a
+  newline can no longer make the payload invalid and block the stream, and
+  entries carry the logger's fields and timestamps. `Close` waits for the
+  batch on the wire, tries once more within the request timeout, releases its
+  connections, and returns `ErrHTTPUndelivered` with the number of lines never
+  delivered. The queue holds at most 100 batches; past that, `Write` drops the
+  line with `ErrHTTPBufferFull`. Zero or negative `BatchSize`, `FlushInterval`,
+  and `Timeout` take their defaults instead of panicking, crashing the
+  process, or disabling the timeout, and `Health` reports a failing endpoint.
+
+### Changed
+- HTTP: a `FlushInterval` of 0 means the 5 s default, as it does for
+  `NewHTTPAdapter`, instead of no periodic flush. `Write` and `Flush` after
+  `Close` return `ErrHTTPClosed`. The batch `timestamp` is the send time in
+  Unix seconds, and integer fields of every width render as JSON numbers.
+
 ## [1.1.2] - 2026-11-16
 
 ### Changed

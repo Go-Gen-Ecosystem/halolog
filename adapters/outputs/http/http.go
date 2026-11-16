@@ -20,9 +20,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
+	"math"
 	"net/http"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,9 +30,30 @@ import (
 	"github.com/go-gen-ecosystem/halolog/utils"
 )
 
+const (
+	defaultBatchSize     = 100
+	defaultFlushInterval = 5 * time.Second
+	defaultTimeout       = 30 * time.Second
+	streamingTimeout     = 10 * time.Second
+
+	// maxBufferedBatches bounds, in batches, the entries held while the
+	// endpoint is slow or down; minBuffered keeps small batch sizes useful.
+	maxBufferedBatches = 100
+	minBuffered        = 1024
+
+	retryMin = 100 * time.Millisecond // first retry delay; it doubles per failure
+	retryMax = 30 * time.Second
+
+	maxDrainBytes      = 64 << 10 // response body read so the connection is reused
+	maxRetainedBytes   = 4 << 20  // larger queue buffers are dropped after a burst
+	maxRetainedScratch = 64 << 10 // larger format buffers are not pooled
+)
+
 var httpStatusErrors [600]*HTTPStatusError
 
-// HTTPAdapterOptions - Configuration for HTTP adapter.
+// HTTPAdapterOptions - Configuration for HTTP adapter. A zero or negative
+// BatchSize, FlushInterval, or Timeout takes its default: 100 entries, 5 s,
+// and 30 s.
 //
 //nolint:revive // HTTP prefix is the intended public API name; renaming would break callers across the module.
 type HTTPAdapterOptions struct {
@@ -53,6 +73,15 @@ var (
 	ErrHTTPCreateReq = errors.New("failed to create request")
 	ErrHTTPSendReq   = errors.New("failed to send request")
 	ErrHTTPBatch     = errors.New("failed to send batch")
+
+	// ErrHTTPClosed is returned by Write and Flush after Close.
+	ErrHTTPClosed = errors.New("http adapter is closed")
+	// ErrHTTPBufferFull is returned by Write when the endpoint has fallen so
+	// far behind that the buffer is full; the entry is dropped and counted.
+	ErrHTTPBufferFull = errors.New("http adapter buffer is full")
+	// ErrHTTPUndelivered is returned by Close when entries were never
+	// delivered: dropped while running, or still unsent when Close gave up.
+	ErrHTTPUndelivered = errors.New("http adapter could not deliver")
 )
 
 // HTTPStatusError represents an HTTP status error.
@@ -77,32 +106,50 @@ func newHTTPStatusError(code int) error {
 	}
 }
 
-// HTTPAdapter - TRULY zero-alloc with sync.Pool.
+// HTTPAdapter sends log entries to an HTTP endpoint in JSON batches.
+//
+// Write formats the entry into a bounded queue and returns; it never keeps
+// the entry. One delivery goroutine sends a batch when BatchSize entries
+// wait, every FlushInterval, and on Flush. A batch that fails is retried, in
+// order, with exponential backoff, and nothing behind it is lost; a batch the
+// endpoint rejects with a 4xx other than 408 or 429 is dropped and counted.
+// With BatchSize 1 (streaming), Write delivers before it returns.
 //
 //nolint:revive // HTTP prefix is the intended public API name; renaming would break callers across the module.
 type HTTPAdapter struct {
-	mu            sync.RWMutex
 	url           string
 	method        string
-	headers       map[string]string
+	header        http.Header
 	batchSize     int
 	flushInterval time.Duration
+	timeout       time.Duration
 	client        *http.Client
-	buffer        []*types.LogEntry
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
 	adapterType   string // Track adapter type for Name() method
 
 	// Formatter, swappable at runtime. Behind an atomic pointer so a
-	// concurrent SetFormatter never tears the interface value an in-flight
-	// flush is reading.
+	// concurrent SetFormatter never tears the interface value a Write reads.
 	formatter atomic.Pointer[types.Formatter]
+	scratch   sync.Pool // *[]byte format buffers
 
-	// POOLS: Reusable objects
-	entryPool       sync.Pool // []*types.LogEntry
-	jsonBufPool     sync.Pool // *bytes.Buffer
-	flushInProgress atomic.Bool
+	queue    *recordQueue
+	flushReq chan chan error
+	done     chan struct{}
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+
+	closeOnce sync.Once
+	closeErr  error // set by the delivery goroutine before it exits
+
+	unsent  atomic.Int64          // entries accepted and not yet delivered or dropped
+	dropped atomic.Int64          // entries lost: buffer full or rejected by the endpoint
+	health  atomic.Pointer[error] // the latest failure; nil after a delivery
+
+	// Owned by the delivery goroutine.
+	pending pendingChunk
+	body    bytes.Buffer
+	backoff time.Duration
+	retryAt time.Time
 }
 
 func init() {
@@ -114,284 +161,160 @@ func init() {
 	}
 }
 
-// NewHTTPAdapterWithOptions - FIXED: Proper pool initialization
+// NewHTTPAdapterWithOptions creates an HTTP adapter and starts its delivery
+// goroutine; Close stops it.
 func NewHTTPAdapterWithOptions(options *HTTPAdapterOptions) *HTTPAdapter {
 	if options == nil {
 		options = &HTTPAdapterOptions{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Set defaults - only apply defaults when not explicitly set
 	method := options.Method
 	if method == "" {
-		method = "POST"
+		method = http.MethodPost
 	}
-	batchSize := options.BatchSize
-	if batchSize == 0 {
-		batchSize = 100
-	}
-	flushInterval := options.FlushInterval
-	timeout := options.Timeout
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
+	batchSize := orDefault(options.BatchSize, defaultBatchSize)
+	timeout := orDefault(options.Timeout, defaultTimeout)
 	headers := options.Headers
 	if headers == nil {
 		headers = map[string]string{"Content-Type": "application/json"}
+	}
+	header := make(http.Header, len(headers))
+	for k, v := range headers {
+		header.Set(k, v)
+	}
+
+	// Streaming delivers from Write itself, so it never wakes the goroutine.
+	threshold := batchSize
+	if batchSize == 1 {
+		threshold = math.MaxInt
 	}
 
 	adapter := &HTTPAdapter{
 		url:           options.URL,
 		method:        method,
-		headers:       headers,
+		header:        header,
 		batchSize:     batchSize,
-		flushInterval: flushInterval,
-		adapterType:   "HTTPAdapter", // Default type
+		flushInterval: orDefault(options.FlushInterval, defaultFlushInterval),
+		timeout:       timeout,
+		adapterType:   "HTTPAdapter",
 		client: &http.Client{
 			Timeout: timeout,
-			// CRITICAL: Use custom transport for connection reuse
 			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
 				MaxIdleConns:        100,
 				MaxIdleConnsPerHost: 100,
 				MaxConnsPerHost:     100,
 				IdleConnTimeout:     90 * time.Second,
-				DisableCompression:  true, // Avoid compression overhead
+				DisableCompression:  true,
 			},
 		},
-		buffer: make([]*types.LogEntry, 0, batchSize),
-		ctx:    ctx,
-		cancel: cancel,
+		queue:    newRecordQueue(max(maxBufferedBatches*batchSize, minBuffered), threshold),
+		flushReq: make(chan chan error),
+		done:     make(chan struct{}),
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+	adapter.scratch.New = func() any {
+		b := make([]byte, 0, 512)
+		return &b
 	}
 
-	// CRITICAL: Initialize pools with proper constructors
-	adapter.entryPool = sync.Pool{
-		New: func() interface{} {
-			slice := make([]*types.LogEntry, 0, batchSize)
-			return &slice
-		},
-	}
-
-	adapter.jsonBufPool = sync.Pool{
-		New: func() interface{} {
-			return &bytes.Buffer{}
-		},
-	}
-
-	// Set formatter
 	if options.Formatter != nil {
 		adapter.SetFormatter(options.Formatter)
 	} else {
-		adapter.SetFormatter(NewZeroJSONFormatter()) // CRITICAL: Must be zero-alloc
+		adapter.SetFormatter(NewZeroJSONFormatter())
 	}
 
-	// Start flusher
 	adapter.wg.Add(1)
 	go adapter.StartHttpFlushTimer()
-
 	return adapter
 }
 
-// Write - FIXED: No allocations
+// Write formats entry into the queue; the caller may reuse entry as soon as
+// it returns. It returns ErrHTTPBufferFull when the endpoint has fallen too
+// far behind and ErrHTTPClosed after Close. With BatchSize 1 it returns the
+// delivery error.
 func (a *HTTPAdapter) Write(entry *types.LogEntry) error {
 	if entry == nil {
 		return ErrHTTPNilEntry
 	}
 
-	a.mu.Lock()
-	a.buffer = append(a.buffer, entry)
-	shouldFlush := len(a.buffer) >= a.batchSize
-	a.mu.Unlock()
-
-	if shouldFlush {
-		// If batch size is 1 (streaming mode), flush synchronously to return errors
-		if a.batchSize == 1 {
-			return a.Flush()
-		}
-
-		// Otherwise flush asynchronously
-		if a.flushInProgress.CompareAndSwap(false, true) {
-			go func() {
-				defer a.flushInProgress.Store(false)
-				_ = a.doFlush()
-			}()
+	p := a.scratch.Get().(*[]byte)
+	record := bytes.TrimSuffix((*a.formatter.Load()).Format(entry, (*p)[:0]), newline)
+	var err error
+	if len(record) > 0 {
+		a.unsent.Add(1)
+		if err = a.queue.Push(record); err != nil {
+			a.unsent.Add(-1)
 		}
 	}
+	if cap(record) <= maxRetainedScratch {
+		*p = record[:0]
+		a.scratch.Put(p)
+	}
 
+	switch {
+	case errors.Is(err, ErrHTTPBufferFull):
+		a.dropped.Add(1)
+		a.setHealth(err)
+		return err
+	case err != nil:
+		return err
+	case a.batchSize == 1:
+		return a.Flush()
+	}
 	return nil
 }
 
-// Flush - FIXED: Zero allocations in hot path (implements types.Adapter interface)
+var newline = []byte{'\n'}
+
+// Flush tries once to deliver every entry written before it and returns the
+// first failure. Entries that failed to send stay queued for a retry, unless
+// the endpoint rejected them for good.
 func (a *HTTPAdapter) Flush() error {
-	a.mu.Lock()
-
-	if len(a.buffer) == 0 {
-		a.mu.Unlock()
-		return nil
+	reply := make(chan error, 1)
+	select {
+	case a.flushReq <- reply:
+		return <-reply
+	case <-a.done:
+		return ErrHTTPClosed
 	}
-
-	// Get pooled slice pointer
-	entriesPtr := a.entryPool.Get().(*[]*types.LogEntry)
-	entries := (*entriesPtr)[:0]
-	entries = append(entries, a.buffer...)
-	bufferLen := len(a.buffer)
-	a.buffer = a.buffer[:0] // Reset but keep capacity
-	a.mu.Unlock()
-
-	// Process batches WITHOUT allocations
-	var batchErr error
-	for i := 0; i < bufferLen; i += a.batchSize {
-		end := i + a.batchSize
-		if end > bufferLen {
-			end = bufferLen
-		}
-
-		// Pass slice and indices instead of creating sub-slice
-		if err := a.sendBatch(entries, i, end); err != nil {
-			// Re-queue failed entries for retry. The failed window MUST be
-			// copied out of `entries`: that slice's backing array goes back to
-			// entryPool below, and prepending an alias of it would leave
-			// a.buffer pointing into pooled memory that the next flush
-			// overwrites (silent entry corruption under retry).
-			a.mu.Lock()
-			requeued := make([]*types.LogEntry, 0, (end-i)+len(a.buffer))
-			requeued = append(requeued, entries[i:end]...)
-			a.buffer = append(requeued, a.buffer...)
-			a.mu.Unlock()
-			batchErr = err
-			break
-		}
-	}
-
-	// Return slice to pool
-	*entriesPtr = entries
-	a.entryPool.Put(entriesPtr)
-
-	return batchErr
 }
 
-// sendBatch - FIXED: TRUE zero-allocation implementation
-func (a *HTTPAdapter) sendBatch(entries []*types.LogEntry, start, end int) error {
-	count := end - start
-	if count == 0 {
-		return nil
-	}
-
-	// Get pooled buffer
-	buf := a.jsonBufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	// NO DEFER - explicit return for zero alloc
-
-	// Build JSON with ZERO string allocations
-	buf.WriteString(`{"timestamp":`)
-
-	// Use stack-allocated buffer for numbers
-	var numBuf [20]byte
-	n := strconv.AppendInt(numBuf[:0], entries[start].Timestamp.Unix(), 10)
-	buf.Write(n)
-
-	buf.WriteString(`,"count":`)
-	n = strconv.AppendInt(numBuf[:0], int64(count), 10)
-	buf.Write(n)
-
-	buf.WriteString(`,"entries":[`)
-
-	// Snapshot the formatter once per batch (atomic — safe against a
-	// concurrent SetFormatter) and reuse one scratch buffer across entries.
-	formatter := *a.formatter.Load()
-	tempBuf := make([]byte, 0, 1024)
-	for i := start; i < end; i++ {
-		if i > start {
-			buf.WriteByte(',')
-		}
-		formatted := formatter.Format(entries[i], tempBuf[:0])
-		buf.Write(formatted)
-		tempBuf = formatted // keep any growth for the next entry
-	}
-
-	buf.WriteString("]}")
-
-	req2, err := http.NewRequestWithContext(a.ctx, a.method, a.url, buf)
-	if err != nil {
-		a.jsonBufPool.Put(buf)
-		return ErrHTTPCreateReq
-	}
-
-	// Copy pre-existing headers efficiently
-	if len(a.headers) > 0 {
-		// Clear old headers
-		for k := range req2.Header {
-			delete(req2.Header, k)
-		}
-		// Set new headers
-		for k, v := range a.headers {
-			req2.Header.Set(k, v)
-		}
-	}
-
-	// Send request (this will allocate internally, but we can't control stdlib)
-	resp, err := a.client.Do(req2)
-
-	if err != nil {
-		a.jsonBufPool.Put(buf)
-		return ErrHTTPSendReq
-	}
-
-	// CRITICAL: Drain response body for connection reuse WITHOUT allocations
-	// Use stack-allocated buffer
-	var discard [512]byte
-	for {
-		_, err := resp.Body.Read(discard[:])
-		if err != nil {
-			break
-		}
-	}
-	_ = resp.Body.Close()
-
-	// NOW return buffer to pool
-	a.jsonBufPool.Put(buf)
-
-	// Only return error for non-success status codes
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return newHTTPStatusError(resp.StatusCode)
-	}
-	return nil
-}
-
-// Close - FIXED: Proper cleanup
+// Close refuses further entries, makes a last attempt to deliver what is
+// queued, bounded by the request timeout, and releases its connections. It
+// returns ErrHTTPUndelivered, with the count, if any entry was never
+// delivered. Calling it again returns the same result.
 func (a *HTTPAdapter) Close() error {
-	// Force a final flush BEFORE cancelling context
-	_ = a.Flush() // Final flush; error is non-actionable during Close
-
-	// Then cancel context and wait for background goroutines
-	a.cancel()
-	a.wg.Wait()
-	return nil
+	a.closeOnce.Do(func() {
+		a.queue.Close()
+		close(a.done)
+		a.wg.Wait()
+		a.cancel()
+		a.client.CloseIdleConnections()
+	})
+	return a.closeErr
 }
 
-// Flush - Public flush method for testing
-func (a *HTTPAdapter) doFlush() error {
-	return a.Flush()
-}
-
-// WriteZero - Zero-allocation write method for testing
+// WriteZero implements types.Adapter; it is Write.
 func (a *HTTPAdapter) WriteZero(entry *types.LogEntry) error {
 	return a.Write(entry)
 }
 
-// Health - Returns the health status of the adapter
+// Health returns nil while deliveries succeed, the latest failure while they
+// do not, and context.Canceled after Close.
 func (a *HTTPAdapter) Health() error {
-	// Check if context is cancelled first
-	select {
-	case <-a.ctx.Done():
-		return a.ctx.Err()
-	default:
+	if err := a.ctx.Err(); err != nil {
+		return err
 	}
-
-	// Simple health check - verify we can acquire the lock
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	if err := a.health.Load(); err != nil {
+		return *err
+	}
 	return nil
 }
+
+func (a *HTTPAdapter) setHealth(err error) { a.health.Store(&err) }
 
 // Name - Returns the adapter name
 func (a *HTTPAdapter) Name() string {
@@ -399,7 +322,7 @@ func (a *HTTPAdapter) Name() string {
 }
 
 // SetFormatter sets the formatter for the adapter (nil is ignored). Safe to
-// call concurrently with in-flight flushes.
+// call concurrently with Write.
 func (a *HTTPAdapter) SetFormatter(formatter types.Formatter) {
 	if formatter == nil {
 		return
@@ -407,205 +330,29 @@ func (a *HTTPAdapter) SetFormatter(formatter types.Formatter) {
 	a.formatter.Store(&formatter)
 }
 
-// StartHttpFlushTimer runs the background flush loop until the adapter context is cancelled.
-func (a *HTTPAdapter) StartHttpFlushTimer() {
-	defer a.wg.Done()
-
-	// Don't start timer if flush interval is 0
-	if a.flushInterval == 0 {
-		<-a.ctx.Done()
-		_ = a.doFlush() // Final flush only
-		return
-	}
-
-	ticker := time.NewTicker(a.flushInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			_ = a.doFlush()
-		case <-a.ctx.Done():
-			_ = a.doFlush() // Final flush
-			return
-		}
-	}
-}
-
 // NewHTTPAdapter - Creates a new HTTP adapter with default options
 func NewHTTPAdapter(url string) *HTTPAdapter {
-	return NewHTTPAdapterWithOptions(&HTTPAdapterOptions{
-		URL:           url,
-		FlushInterval: 5 * time.Second,
-	})
+	return NewHTTPAdapterWithOptions(&HTTPAdapterOptions{URL: url})
 }
 
-// NewStreamingHTTPAdapter - Creates a streaming HTTP adapter for backward compatibility
+// NewStreamingHTTPAdapter creates an adapter that delivers each entry before
+// Write returns. A zero timeout means 10 s.
 func NewStreamingHTTPAdapter(url string, timeout time.Duration) *HTTPAdapter {
-	// For streaming adapter, 0 timeout means use default of 10 seconds
-	if timeout == 0 {
-		timeout = 10 * time.Second
-	}
 	adapter := NewHTTPAdapterWithOptions(&HTTPAdapterOptions{
-		URL:           url,
-		Timeout:       timeout,
-		BatchSize:     1,
-		FlushInterval: 0,
+		URL:       url,
+		Timeout:   orDefault(timeout, streamingTimeout),
+		BatchSize: 1,
 	})
 	adapter.adapterType = "StreamingHTTPAdapter"
 	return adapter
 }
 
-// Other methods remain similar but ensure no allocations...
-
-// ============================================================================
-// REQUIRED: Zero-Allocation JSON Formatter
-// ============================================================================
-
-// ZeroJSONFormatter - TRUE zero-allocation formatter
-type ZeroJSONFormatter struct {
-	bufPool sync.Pool
-}
-
-// NewZeroJSONFormatter returns a zero-allocation JSON formatter for HTTP batch payloads.
-func NewZeroJSONFormatter() types.Formatter {
-	return &ZeroJSONFormatter{
-		bufPool: sync.Pool{
-			New: func() interface{} {
-				// Pre-size for typical log entry (2KB)
-				b := make([]byte, 0, 2048)
-				return &b
-			},
-		},
+// orDefault returns v, or def when v is zero or negative.
+func orDefault[T ~int | ~int64](v, def T) T {
+	if v <= 0 {
+		return def
 	}
-}
-
-// Format - MUST NOT ALLOCATE
-func (f *ZeroJSONFormatter) Format(entry *types.LogEntry, dst []byte) []byte {
-	if entry == nil {
-		return dst[:0]
-	}
-
-	// Reset dst
-	dst = dst[:0]
-
-	// Build JSON object manually with zero allocations
-	dst = append(dst, '{')
-
-	// Level
-	dst = append(dst, `"level":"`...)
-	dst = append(dst, entry.Level.String()...)
-	dst = append(dst, `"`...)
-
-	// Message
-	if entry.Message != "" {
-		dst = append(dst, `,"message":"`...)
-		// Escape quotes in message (simplified)
-		for i := 0; i < len(entry.Message); i++ {
-			if entry.Message[i] == '"' {
-				dst = append(dst, `\"`...)
-			} else {
-				dst = append(dst, entry.Message[i])
-			}
-		}
-		dst = append(dst, '"')
-	}
-
-	// Timestamp
-	if !entry.Timestamp.IsZero() {
-		dst = append(dst, `,"timestamp":`...)
-		dst = strconv.AppendInt(dst, entry.TimestampUnix, 10)
-	}
-
-	// Fields
-	if len(entry.Fields) > 0 {
-		dst = append(dst, `,"fields":{`...)
-		for i, field := range entry.Fields {
-			if i > 0 {
-				dst = append(dst, ',')
-			}
-			dst = append(dst, '"')
-			dst = append(dst, field.Key...)
-			dst = append(dst, `":`...)
-
-			// Handle different value types without allocations
-			switch v := field.Value.(type) {
-			case string:
-				dst = append(dst, '"')
-				dst = append(dst, v...)
-				dst = append(dst, '"')
-			case int64:
-				dst = strconv.AppendInt(dst, v, 10)
-			case float64:
-				dst = strconv.AppendFloat(dst, v, 'f', -1, 64)
-			case bool:
-				if v {
-					dst = append(dst, "true"...)
-				} else {
-					dst = append(dst, "false"...)
-				}
-			default:
-				// Use string conversion for other types
-				dst = append(dst, '"')
-				str := fmt.Sprint(v)
-				dst = append(dst, str...)
-				dst = append(dst, '"')
-			}
-		}
-		dst = append(dst, '}')
-	}
-
-	dst = append(dst, '}')
-	return dst
-}
-
-// String returns the formatter name
-func (f *ZeroJSONFormatter) String() string {
-	return "ZeroJSONFormatter"
-}
-
-// FormatBatch formats multiple log entries into a single byte slice
-func (f *ZeroJSONFormatter) FormatBatch(entries []types.LogEntry) ([]byte, error) {
-	if len(entries) == 0 {
-		return []byte("[]"), nil
-	}
-
-	// Get buffer from pool
-	bufPtr := f.bufPool.Get().(*[]byte)
-	buf := (*bufPtr)[:0]
-	// Return to pool after formatting
-	defer func() {
-		*bufPtr = buf
-		f.bufPool.Put(bufPtr)
-	}()
-
-	// Start JSON array
-	buf = append(buf, '[')
-
-	// Format each entry
-	for i, entry := range entries {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-
-		// Format individual entry
-		entryBytes := f.Format(&entry, buf[len(buf):])
-		buf = buf[:len(buf)+len(entryBytes)]
-	}
-
-	// End JSON array
-	buf = append(buf, ']')
-	return buf, nil
-}
-
-// Reset - Reset internal state
-func (f *ZeroJSONFormatter) Reset() {
-	// Nothing to reset in this implementation
-}
-
-// EstimatedSize - Pre-allocation hint
-func (f *ZeroJSONFormatter) EstimatedSize() int {
-	return 2048 // Default estimate for typical log entry
+	return v
 }
 
 func buildErrorMessage(code int) string {
