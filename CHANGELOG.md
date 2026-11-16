@@ -8,6 +8,8 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-16
+
 ### Added
 - **Adapter failures are reported.** The logger discarded the error of every
   adapter write, so a failing adapter lost lines without a trace. It now
