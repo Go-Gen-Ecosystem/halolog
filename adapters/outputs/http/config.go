@@ -17,39 +17,69 @@
 package http
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/go-gen-ecosystem/halolog/types"
 )
 
-// HTTPAdapterConfig represents configuration for HTTP adapter.
+// Transport defaults, shared by DefaultHTTPAdapterConfig and every adapter.
+const (
+	defaultMaxIdleConns    = 100
+	defaultMaxConnsPerHost = 100
+	defaultIdleConnTimeout = 90 * time.Second
+)
+
+// HTTPAdapterConfig configures an adapter built by NewHTTPAdapterFromConfig.
+// Start from DefaultHTTPAdapterConfig and change what you need: a zero or
+// negative number takes its default. The transport fields tune the
+// adapter's own client; with Client set, that client is used as it is.
 //
 //nolint:revive // HTTP prefix is the intended public API name; renaming would break callers across the module.
 type HTTPAdapterConfig struct {
-	URL                string
-	Method             string
-	Headers            map[string]string
-	BatchSize          int
-	FlushInterval      time.Duration
-	Timeout            time.Duration
-	Formatter          types.Formatter
-	MaxIdleConns       int
-	MaxConnsPerHost    int
-	IdleConnTimeout    time.Duration
-	DisableCompression bool
+	URL           string
+	Method        string
+	Headers       map[string]string
+	BatchSize     int
+	FlushInterval time.Duration
+	Timeout       time.Duration // bounds each request, whichever client sends it
+	Formatter     types.Formatter
+
+	MaxIdleConns       int           // idle connections kept for reuse
+	MaxConnsPerHost    int           // connections open to the endpoint at once
+	IdleConnTimeout    time.Duration // how long an idle connection is kept
+	DisableCompression bool          // do not ask the endpoint for gzip responses
+
+	// Client sends the requests instead of the adapter's own, for TLS, mTLS,
+	// or a client shared with the rest of the program. Close leaves it as it
+	// is.
+	Client *http.Client
 }
 
-// DefaultHTTPAdapterConfig returns production-ready defaults
+// DefaultHTTPAdapterConfig returns the settings every adapter defaults to.
 func DefaultHTTPAdapterConfig() *HTTPAdapterConfig {
 	return &HTTPAdapterConfig{
-		Method:             "POST",
-		BatchSize:          100,
-		FlushInterval:      5 * time.Second,
-		Timeout:            30 * time.Second,
+		Method:             http.MethodPost,
+		BatchSize:          defaultBatchSize,
+		FlushInterval:      defaultFlushInterval,
+		Timeout:            defaultTimeout,
 		Headers:            map[string]string{"Content-Type": "application/json"},
-		MaxIdleConns:       100,
-		MaxConnsPerHost:    100,
-		IdleConnTimeout:    90 * time.Second,
+		MaxIdleConns:       defaultMaxIdleConns,
+		MaxConnsPerHost:    defaultMaxConnsPerHost,
+		IdleConnTimeout:    defaultIdleConnTimeout,
 		DisableCompression: true,
 	}
+}
+
+// newTransport returns the adapter's own transport: the standard library's
+// default one (proxy from the environment, dial and TLS handshake timeouts,
+// HTTP/2) with the connection settings of cfg.
+func newTransport(cfg *HTTPAdapterConfig) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = orDefault(cfg.MaxIdleConns, defaultMaxIdleConns)
+	t.MaxIdleConnsPerHost = t.MaxIdleConns // every connection goes to one host
+	t.MaxConnsPerHost = orDefault(cfg.MaxConnsPerHost, defaultMaxConnsPerHost)
+	t.IdleConnTimeout = orDefault(cfg.IdleConnTimeout, defaultIdleConnTimeout)
+	t.DisableCompression = cfg.DisableCompression
+	return t
 }

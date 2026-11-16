@@ -176,6 +176,7 @@ func (c Context) Logger() *Logger {
 		discardAdapter: parent.discardAdapter,
 		sampler:        parent.sampler,
 		metrics:        parent.metrics,
+		adapterErrs:    parent.adapterErrs,
 		exitFunc:       parent.exitFunc,
 		recordCaller:   parent.recordCaller,
 		callerSkip:     parent.callerSkip,
