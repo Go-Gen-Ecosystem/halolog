@@ -16,6 +16,19 @@ All notable changes to HaloLog are documented here. This project adheres to
   writes it to stderr at most once a second with the number not shown. A
   successful line pays one nil check: the README benchmark suite, pinned and
   interleaved against v1.2.0, is unchanged, still 0 B/op and 0 allocs/op.
+- **`http.HTTPAdapterOptions.Client`** sends the requests through a caller's
+  `*http.Client`, for TLS, proxy, or transport settings; `Timeout` bounds each
+  request either way.
+
+### Fixed
+- **`http.HTTPAdapterConfig` works.** It and `DefaultHTTPAdapterConfig` were
+  exported but never read, so their transport settings had no effect. The new
+  `NewHTTPAdapterFromConfig` builds an adapter from them, including
+  `MaxIdleConns`, `MaxConnsPerHost`, `IdleConnTimeout`, `DisableCompression`,
+  and a `Client`; `DefaultHTTPAdapterConfig` returns exactly what every adapter
+  defaults to. The adapter's own transport is now the standard library's
+  default one, with its dial and TLS handshake timeouts and HTTP/2, plus these
+  settings.
 
 ## [1.2.0] - 2026-11-16
 

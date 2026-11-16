@@ -53,7 +53,7 @@ var httpStatusErrors [600]*HTTPStatusError
 
 // HTTPAdapterOptions - Configuration for HTTP adapter. A zero or negative
 // BatchSize, FlushInterval, or Timeout takes its default: 100 entries, 5 s,
-// and 30 s.
+// and 30 s. Timeout bounds each request, whichever client sends it.
 //
 //nolint:revive // HTTP prefix is the intended public API name; renaming would break callers across the module.
 type HTTPAdapterOptions struct {
@@ -64,6 +64,11 @@ type HTTPAdapterOptions struct {
 	FlushInterval time.Duration
 	Timeout       time.Duration
 	Formatter     types.Formatter
+
+	// Client sends the requests, for TLS, proxy, or transport settings. Nil
+	// means a client owned by the adapter, whose idle connections Close
+	// releases; a caller's client is left as it is.
+	Client *http.Client
 }
 
 // Pre-allocated errors
@@ -124,6 +129,7 @@ type HTTPAdapter struct {
 	flushInterval time.Duration
 	timeout       time.Duration
 	client        *http.Client
+	ownsClient    bool
 	adapterType   string // Track adapter type for Name() method
 
 	// Formatter, swappable at runtime. Behind an atomic pointer so a
@@ -162,20 +168,40 @@ func init() {
 }
 
 // NewHTTPAdapterWithOptions creates an HTTP adapter and starts its delivery
-// goroutine; Close stops it.
+// goroutine; Close stops it. The transport keeps its defaults; use
+// NewHTTPAdapterFromConfig to tune them.
 func NewHTTPAdapterWithOptions(options *HTTPAdapterOptions) *HTTPAdapter {
 	if options == nil {
 		options = &HTTPAdapterOptions{}
 	}
+	return NewHTTPAdapterFromConfig(&HTTPAdapterConfig{
+		URL:                options.URL,
+		Method:             options.Method,
+		Headers:            options.Headers,
+		BatchSize:          options.BatchSize,
+		FlushInterval:      options.FlushInterval,
+		Timeout:            options.Timeout,
+		Formatter:          options.Formatter,
+		DisableCompression: true,
+		Client:             options.Client,
+	})
+}
+
+// NewHTTPAdapterFromConfig creates an HTTP adapter from cfg and starts its
+// delivery goroutine; Close stops it. A nil cfg means the defaults.
+func NewHTTPAdapterFromConfig(cfg *HTTPAdapterConfig) *HTTPAdapter {
+	if cfg == nil {
+		cfg = DefaultHTTPAdapterConfig()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
-	method := options.Method
+	method := cfg.Method
 	if method == "" {
 		method = http.MethodPost
 	}
-	batchSize := orDefault(options.BatchSize, defaultBatchSize)
-	timeout := orDefault(options.Timeout, defaultTimeout)
-	headers := options.Headers
+	batchSize := orDefault(cfg.BatchSize, defaultBatchSize)
+	timeout := orDefault(cfg.Timeout, defaultTimeout)
+	headers := cfg.Headers
 	if headers == nil {
 		headers = map[string]string{"Content-Type": "application/json"}
 	}
@@ -191,37 +217,31 @@ func NewHTTPAdapterWithOptions(options *HTTPAdapterOptions) *HTTPAdapter {
 	}
 
 	adapter := &HTTPAdapter{
-		url:           options.URL,
+		url:           cfg.URL,
 		method:        method,
 		header:        header,
 		batchSize:     batchSize,
-		flushInterval: orDefault(options.FlushInterval, defaultFlushInterval),
+		flushInterval: orDefault(cfg.FlushInterval, defaultFlushInterval),
 		timeout:       timeout,
+		client:        cfg.Client,
+		ownsClient:    cfg.Client == nil,
 		adapterType:   "HTTPAdapter",
-		client: &http.Client{
-			Timeout: timeout,
-			Transport: &http.Transport{
-				Proxy:               http.ProxyFromEnvironment,
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 100,
-				MaxConnsPerHost:     100,
-				IdleConnTimeout:     90 * time.Second,
-				DisableCompression:  true,
-			},
-		},
-		queue:    newRecordQueue(max(maxBufferedBatches*batchSize, minBuffered), threshold),
-		flushReq: make(chan chan error),
-		done:     make(chan struct{}),
-		ctx:      ctx,
-		cancel:   cancel,
+		queue:         newRecordQueue(max(maxBufferedBatches*batchSize, minBuffered), threshold),
+		flushReq:      make(chan chan error),
+		done:          make(chan struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+	}
+	if adapter.ownsClient {
+		adapter.client = &http.Client{Timeout: timeout, Transport: newTransport(cfg)}
 	}
 	adapter.scratch.New = func() any {
 		b := make([]byte, 0, 512)
 		return &b
 	}
 
-	if options.Formatter != nil {
-		adapter.SetFormatter(options.Formatter)
+	if cfg.Formatter != nil {
+		adapter.SetFormatter(cfg.Formatter)
 	} else {
 		adapter.SetFormatter(NewZeroJSONFormatter())
 	}
@@ -283,7 +303,8 @@ func (a *HTTPAdapter) Flush() error {
 }
 
 // Close refuses further entries, makes a last attempt to deliver what is
-// queued, bounded by the request timeout, and releases its connections. It
+// queued, bounded by the request timeout, and releases the connections of
+// a client it owns. It
 // returns ErrHTTPUndelivered, with the count, if any entry was never
 // delivered. Calling it again returns the same result.
 func (a *HTTPAdapter) Close() error {
@@ -292,7 +313,9 @@ func (a *HTTPAdapter) Close() error {
 		close(a.done)
 		a.wg.Wait()
 		a.cancel()
-		a.client.CloseIdleConnections()
+		if a.ownsClient {
+			a.client.CloseIdleConnections()
+		}
 	})
 	return a.closeErr
 }

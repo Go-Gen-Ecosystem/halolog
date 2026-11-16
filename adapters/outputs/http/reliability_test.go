@@ -404,3 +404,34 @@ func TestHTTPAdapter_ConcurrentUseAndClose(t *testing.T) {
 	wg.Wait()
 	_ = a.Close()
 }
+
+// countingTransport counts the requests that go through it.
+type countingTransport struct{ requests atomic.Int64 }
+
+func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.requests.Add(1)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// A caller's client carries every request, and Timeout still bounds each one
+// even when that client sets none.
+func TestHTTPAdapter_UsesTheCallersClient(t *testing.T) {
+	transport := &countingTransport{}
+	client := &http.Client{Transport: transport} // no timeout of its own
+
+	c := newCollector(t)
+	a := NewHTTPAdapterWithOptions(&HTTPAdapterOptions{URL: c.URL, Client: client})
+	_ = a.Write(line(0))
+	if err := a.Flush(); err != nil || transport.requests.Load() != 1 {
+		t.Fatalf("Flush = %v after %d requests through the caller's client", err, transport.requests.Load())
+	}
+	_ = a.Close()
+
+	a = NewHTTPAdapterWithOptions(&HTTPAdapterOptions{URL: hangingServer(t).URL, Client: client, Timeout: 200 * time.Millisecond})
+	_ = a.Write(line(1))
+	start := time.Now()
+	if err := a.Flush(); err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("Flush against a hanging endpoint = %v after %v, want a timeout near 200ms", err, time.Since(start))
+	}
+	_ = a.Close()
+}

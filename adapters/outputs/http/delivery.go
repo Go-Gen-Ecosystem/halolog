@@ -166,6 +166,8 @@ func (a *HTTPAdapter) send(ctx context.Context, p *pendingChunk, end int) error 
 	a.body.Write(records)
 	a.body.WriteString("]}")
 
+	ctx, cancel := context.WithTimeout(ctx, a.timeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, a.method, a.url, bytes.NewReader(a.body.Bytes()))
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrHTTPCreateReq, err)

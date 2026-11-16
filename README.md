@@ -407,6 +407,17 @@ adapter := http.NewHTTPAdapterWithOptions(&http.HTTPAdapterOptions{
 })
 ```
 
+To tune the connections, start from the defaults and change what you need,
+or pass your own `*http.Client` (TLS, mTLS, proxies) in `Client`:
+
+```go
+cfg := http.DefaultHTTPAdapterConfig()
+cfg.URL = "https://logs.example.com/ingest"
+cfg.MaxConnsPerHost = 10
+adapter := http.NewHTTPAdapterFromConfig(cfg)
+defer adapter.Close() // delivers what is queued; reports what it could not
+```
+
 ### Async ring
 
 Wrap any destination to move serialization and I/O off the calling
