@@ -8,6 +8,8 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-16
+
 ### Added
 - `http.ErrHTTPClosed`, `http.ErrHTTPBufferFull`, `http.ErrHTTPUndelivered`,
   `syslog.ErrSyslogClosed`, and `syslog.ErrSyslogAddress`.
