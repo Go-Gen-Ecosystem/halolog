@@ -106,8 +106,8 @@ func TestNewHTTPAdapter(t *testing.T) {
 				if a.ctx == nil || a.cancel == nil {
 					t.Error("Context: nil")
 				}
-				if cap(a.buffer) != 100 {
-					t.Errorf("Buffer capacity: got %d", cap(a.buffer))
+				if a.queue.threshold != 100 {
+					t.Errorf("Batch threshold: got %d", a.queue.threshold)
 				}
 			},
 		},
@@ -128,7 +128,7 @@ func TestNewHTTPAdapter(t *testing.T) {
 				if a.batchSize != 50 {
 					t.Error("BatchSize not set")
 				}
-				if a.headers["X-Custom"] != "value" {
+				if a.header.Get("X-Custom") != "value" {
 					t.Error("Headers not set")
 				}
 				if a.client.Timeout != 60*time.Second {
@@ -137,11 +137,11 @@ func TestNewHTTPAdapter(t *testing.T) {
 			},
 		},
 		{
-			name: "zero flush interval",
+			name: "zero flush interval takes the default",
 			opts: &HTTPAdapterOptions{URL: "http://test.com", FlushInterval: 0},
 			validate: func(t *testing.T, a *HTTPAdapter) {
-				if a.flushInterval != 0 {
-					t.Error("FlushInterval not zero")
+				if a.flushInterval != defaultFlushInterval {
+					t.Errorf("FlushInterval: got %v", a.flushInterval)
 				}
 			},
 		},
@@ -208,9 +208,7 @@ func TestHTTPAdapter_Write(t *testing.T) {
 			t.Errorf("Write: %v", err)
 		}
 
-		adapter.mu.RLock()
-		l := len(adapter.buffer)
-		adapter.mu.RUnlock()
+		l := int(adapter.unsent.Load())
 		if l != 1 {
 			t.Errorf("Buffer length: got %d", l)
 		}
@@ -271,9 +269,7 @@ func TestHTTPAdapter_Write(t *testing.T) {
 		}
 		wg.Wait()
 
-		adapter.mu.RLock()
-		l := len(adapter.buffer)
-		adapter.mu.RUnlock()
+		l := int(adapter.unsent.Load())
 		if l != 100 {
 			t.Errorf("Concurrent writes: got %d entries", l)
 		}
@@ -298,9 +294,7 @@ func TestHTTPAdapter_WriteZero(t *testing.T) {
 		t.Errorf("WriteZero: %v", err)
 	}
 
-	adapter.mu.RLock()
-	l := len(adapter.buffer)
-	adapter.mu.RUnlock()
+	l := int(adapter.unsent.Load())
 	if l != 1 {
 		t.Error("WriteZero did not add entry")
 	}
@@ -329,7 +323,7 @@ func TestHTTPAdapter_Flush(t *testing.T) {
 	t.Run("empty buffer", func(t *testing.T) {
 		adapter := NewHTTPAdapter("http://test.com")
 		defer func() { _ = adapter.Close() }()
-		if err := adapter.doFlush(); err != nil {
+		if err := adapter.Flush(); err != nil {
 			t.Errorf("Flush empty: %v", err)
 		}
 	})
@@ -354,7 +348,7 @@ func TestHTTPAdapter_Flush(t *testing.T) {
 		_ = adapter.Write(&types.LogEntry{Level: types.InfoLevel, Message: "msg2"})
 		_ = adapter.Write(&types.LogEntry{Level: types.InfoLevel, Message: "msg3"})
 
-		if err := adapter.doFlush(); err != nil {
+		if err := adapter.Flush(); err != nil {
 			t.Errorf("Flush: %v", err)
 		}
 
@@ -389,13 +383,11 @@ func TestHTTPAdapter_Flush(t *testing.T) {
 		entry1, entry2 := &types.LogEntry{Message: "1"}, &types.LogEntry{Message: "2"}
 		_ = adapter.Write(entry1)
 		_ = adapter.Write(entry2)
-		_ = adapter.doFlush()
+		_ = adapter.Flush()
 
 		time.Sleep(100 * time.Millisecond)
 
-		adapter.mu.RLock()
-		l := len(adapter.buffer)
-		adapter.mu.RUnlock()
+		l := int(adapter.unsent.Load())
 		if l != 2 {
 			t.Error("Failed entries not requeued")
 		}
@@ -411,7 +403,7 @@ func TestHTTPAdapter_Flush(t *testing.T) {
 
 		_ = adapter.Write(&types.LogEntry{Message: "1"})
 		_ = adapter.Write(&types.LogEntry{Message: "2"})
-		if err := adapter.doFlush(); err == nil {
+		if err := adapter.Flush(); err == nil {
 			t.Error("Expected network error")
 		}
 	})
@@ -435,7 +427,7 @@ func TestHTTPAdapter_Flush(t *testing.T) {
 		for i := 0; i < 7; i++ {
 			_ = adapter.Write(&types.LogEntry{Message: utils.FormatIntWithPrefix("md", i)})
 		}
-		_ = adapter.doFlush()
+		_ = adapter.Flush()
 
 		time.Sleep(150 * time.Millisecond)
 		if atomic.LoadInt32(&requests) != 3 {
@@ -639,7 +631,7 @@ func TestStreamingHTTPAdapter_OtherMethods(t *testing.T) {
 	if a.Health() != nil {
 		t.Error("Health should return nil")
 	}
-	if a.doFlush() != nil {
+	if a.Flush() != nil {
 		t.Error("Flush should return nil")
 	}
 	if err := a.Close(); err != nil {
@@ -783,7 +775,7 @@ func TestHTTPAdapter_FullLifecycle(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Manually flush remaining
-	_ = adapter.doFlush()
+	_ = adapter.Flush()
 
 	// Close for final flush
 	_ = adapter.Close()
@@ -828,7 +820,7 @@ func TestHTTPAdapter_Recovery(t *testing.T) {
 	// Successful batch
 	_ = adapter.Write(&types.LogEntry{Message: "s1"})
 	_ = adapter.Write(&types.LogEntry{Message: "s2"})
-	if err := adapter.doFlush(); err != nil {
+	if err := adapter.Flush(); err != nil {
 		t.Fatalf("initial flush failed: %v", err)
 	}
 
@@ -836,7 +828,7 @@ func TestHTTPAdapter_Recovery(t *testing.T) {
 	serverUp.Store(false)
 	_ = adapter.Write(&types.LogEntry{Message: "f1"})
 	_ = adapter.Write(&types.LogEntry{Message: "f2"})
-	if err := adapter.doFlush(); err == nil {
+	if err := adapter.Flush(); err == nil {
 		t.Error("Expected error when server down")
 	}
 
@@ -844,7 +836,7 @@ func TestHTTPAdapter_Recovery(t *testing.T) {
 	serverUp.Store(true)
 	_ = adapter.Write(&types.LogEntry{Message: "r1"})
 	_ = adapter.Write(&types.LogEntry{Message: "r2"})
-	_ = adapter.doFlush()
+	_ = adapter.Flush()
 
 	actualCount := atomic.LoadInt32(&successCount)
 	actualRequests := atomic.LoadInt32(&requestCount)
@@ -938,7 +930,7 @@ func TestHTTPAdapter_RaceDetector(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 10; i++ {
-			_ = adapter.doFlush()
+			_ = adapter.Flush()
 			time.Sleep(5 * time.Millisecond)
 		}
 	}()
@@ -1016,18 +1008,16 @@ func BenchmarkHTTPAdapter_WriteWithFormatter(b *testing.B) {
 	})
 	defer func() { _ = adapter.Close() }()
 
-	// Pre-populate
-	for i := 0; i < 100; i++ {
-		adapter.buffer = append(adapter.buffer, &types.LogEntry{Message: "x"})
-	}
-
+	entry := &types.LogEntry{Level: types.InfoLevel, Message: "x"}
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		// Refill and flush
-		adapter.buffer = adapter.buffer[:100]
-		_ = adapter.doFlush()
+		// A full batch, then a flush
+		for j := 0; j < 100; j++ {
+			_ = adapter.Write(entry)
+		}
+		_ = adapter.Flush()
 	}
 }
 

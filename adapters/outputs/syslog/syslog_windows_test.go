@@ -202,3 +202,10 @@ func TestSyslogWindowsAdapter_MultipleOperations(t *testing.T) {
 		t.Errorf("Close should not error: %v", err)
 	}
 }
+
+// Nil options are refused without a panic.
+func TestSyslogWindowsAdapter_NilOptions(t *testing.T) {
+	if a := NewSyslogAdapterWithOptions(nil); a == nil || a.Close() != nil {
+		t.Fatal("NewSyslogAdapterWithOptions(nil) did not return a usable adapter")
+	}
+}
