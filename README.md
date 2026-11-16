@@ -15,6 +15,10 @@ hot path. It logs a full JSON line in 22.6 ns on the benchmark host, roughly
 doing it. The allocation claim is not a slogan: committed guard tests fail
 the build if any hot path ever allocates.
 
+<p align="center">
+  <img src="assets/benchmark-race.gif" width="640" alt="Bare message, nanoseconds per line on linux/amd64: HaloLog 22.6, phuslu 61.3, zerolog 85.8, zap 142.2, slog 230.3, logrus 911.2">
+</p>
+
 ## Features
 
 - **Zero-allocation hot path.** 22.6 ns/op for a bare message and 0 B/op in
