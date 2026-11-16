@@ -6,10 +6,4 @@ go 1.24.0
 // cached for v1.0.0 predates it. Use v1.0.1 or later.
 retract v1.0.0
 
-require gopkg.in/yaml.v3 v3.0.1
-
-require (
-	github.com/kr/pretty v0.3.1 // indirect
-	github.com/rogpeppe/go-internal v1.10.0 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
-)
+require go.yaml.in/yaml/v4 v4.0.0

@@ -29,6 +29,9 @@ if [[ "$mode" == local ]]; then
   cp go.mod "$scratch/local.mod"
   cp go.sum "$scratch/local.sum"
   go mod edit "-modfile=$scratch/local.mod" "-replace=$core_module=$repo_root"
+  # The local core may require modules the published one does not; resolve
+  # them into the scratch manifests only.
+  go mod tidy "-modfile=$scratch/local.mod"
   flags+=("-modfile=$scratch/local.mod")
 else
   # Versioned dependencies only. A green local integration result is not a

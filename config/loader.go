@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/go-gen-ecosystem/halolog/types"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // AppenderConfig represents an appender configuration

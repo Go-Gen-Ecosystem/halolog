@@ -30,7 +30,7 @@ import (
 	"unicode"
 
 	jsonfmt "github.com/go-gen-ecosystem/halolog/adapters/formatters/json"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Schema is the on-disk YAML shape.
