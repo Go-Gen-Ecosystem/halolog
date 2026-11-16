@@ -8,6 +8,8 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-16
+
 ### Changed
 - **YAML parsing uses `go.yaml.in/yaml/v4`**, maintained by the YAML
   organization, instead of the archived `gopkg.in/yaml.v3`. Suggested by
