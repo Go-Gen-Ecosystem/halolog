@@ -9,8 +9,8 @@ All notable changes to HaloLog are documented here. This project adheres to
 ## [Unreleased]
 
 ### Added
-- `http.ErrHTTPClosed`, `http.ErrHTTPBufferFull`, and
-  `http.ErrHTTPUndelivered`.
+- `http.ErrHTTPClosed`, `http.ErrHTTPBufferFull`, `http.ErrHTTPUndelivered`,
+  `syslog.ErrSyslogClosed`, and `syslog.ErrSyslogAddress`.
 
 ### Fixed
 - **The HTTP adapter keeps every line it accepts, and reports the ones it
@@ -29,12 +29,23 @@ All notable changes to HaloLog are documented here. This project adheres to
   line with `ErrHTTPBufferFull`. Zero or negative `BatchSize`, `FlushInterval`,
   and `Timeout` take their defaults instead of panicking, crashing the
   process, or disabling the timeout, and `Health` reports a failing endpoint.
+- **The syslog adapter can no longer hang, and it reconnects.** It writes
+  through its own connection, in the `log/syslog` wire format, with a 5 s
+  deadline on every dial and write, so a collector that stops reading cannot
+  block `Write` or `Close`. A connection that failed, at startup or later, is
+  redialled with exponential backoff. Newlines inside a message are escaped,
+  so a message cannot forge a second record. `SetTag` and `SetFacility` apply
+  to the next line, setting only one of `Network` and `Address` is an error
+  instead of a silent switch to the local socket, nil options and entries no
+  longer panic, and a `Write` allocates nothing.
 
 ### Changed
 - HTTP: a `FlushInterval` of 0 means the 5 s default, as it does for
   `NewHTTPAdapter`, instead of no periodic flush. `Write` and `Flush` after
   `Close` return `ErrHTTPClosed`. The batch `timestamp` is the send time in
   Unix seconds, and integer fields of every width render as JSON numbers.
+- syslog: a zero `Facility` (`LOG_KERN`, reserved for the kernel) means
+  `LOG_LOCAL0`, and `Write` after `Close` returns `ErrSyslogClosed`.
 
 ## [1.1.2] - 2026-11-16
 

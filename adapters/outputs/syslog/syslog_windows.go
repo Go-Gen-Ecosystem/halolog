@@ -57,6 +57,9 @@ func NewSyslogAdapter(tag string) *SyslogAdapter {
 
 // NewSyslogAdapterWithOptions creates a stub syslog adapter for Windows
 func NewSyslogAdapterWithOptions(options *SyslogAdapterOptions) *SyslogAdapter {
+	if options == nil {
+		options = &SyslogAdapterOptions{}
+	}
 	return &SyslogAdapter{
 		tag: options.Tag,
 	}
