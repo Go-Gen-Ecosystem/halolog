@@ -8,6 +8,15 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Added
+- **Adapter failures are reported.** The logger discarded the error of every
+  adapter write, so a failing adapter lost lines without a trace. It now
+  counts each failure (`Logger.AdapterErrors`) and hands it to
+  `Config.OnAdapterError` or `Builder.OnAdapterError`, or, without a handler,
+  writes it to stderr at most once a second with the number not shown. A
+  successful line pays one nil check: the README benchmark suite, pinned and
+  interleaved against v1.2.0, is unchanged, still 0 B/op and 0 allocs/op.
+
 ## [1.2.0] - 2026-11-16
 
 ### Added

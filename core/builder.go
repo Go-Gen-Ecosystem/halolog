@@ -152,6 +152,14 @@ func (b *Builder) CallerSkip(skip int) *Builder {
 	return b
 }
 
+// OnAdapterError hands every failed adapter write to fn, with the adapter's
+// name, instead of writing it to stderr. It runs on the logging goroutine and
+// must not log through the same logger.
+func (b *Builder) OnAdapterError(fn func(adapter string, err error)) *Builder {
+	b.config.OnAdapterError = fn
+	return b
+}
+
 // Build creates the configured Logger.
 // Returns an error if configuration is invalid.
 func (b *Builder) Build() (*Logger, error) {

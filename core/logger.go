@@ -74,6 +74,9 @@ type Logger struct {
 	sampler types.Sampler
 	metrics *metricsCollector
 
+	// adapterErrs records adapter write failures; shared with children.
+	adapterErrs *adapterErrors
+
 	// exitFunc terminates the process after a Fatal line (default os.Exit).
 	// Overridable via Config.ExitFunc for tests and embedders.
 	exitFunc func(int)
@@ -137,6 +140,13 @@ type Config struct {
 	// clamped to [0, 64].
 	CallerSkip int
 
+	// OnAdapterError receives every failed adapter write with the adapter's
+	// name. Leave it nil to have failures written to stderr, at most once per
+	// second with a count of those not shown. Logger.AdapterErrors counts
+	// them either way. It runs on the logging goroutine and must not log
+	// through the same logger.
+	OnAdapterError func(adapter string, err error)
+
 	// Advanced features
 	EnableAlerts      bool
 	EnableAggregation bool
@@ -151,6 +161,7 @@ func NewLogger(config Config) *Logger {
 		masker:        config.Masker,
 		enableMasking: config.EnableMasking && config.Masker != nil,
 		exitFunc:      config.ExitFunc,
+		adapterErrs:   &adapterErrors{handler: config.OnAdapterError, out: os.Stderr},
 	}
 
 	// Detect discard adapter for zero-allocation optimization
@@ -587,10 +598,14 @@ func (l *Logger) writeEntry(entry *types.LogEntry) {
 	}
 
 	if len(l.adapters) == 1 {
-		_ = l.adapters[0].WriteZero(entry)
+		if err := l.adapters[0].WriteZero(entry); err != nil {
+			l.adapterFailed(l.adapters[0], err)
+		}
 	} else {
 		for _, a := range l.adapters {
-			_ = a.WriteZero(entry)
+			if err := a.WriteZero(entry); err != nil {
+				l.adapterFailed(a, err)
+			}
 		}
 	}
 
@@ -676,7 +691,9 @@ func (l *Logger) logDirect(level types.LogLevel, msg string) {
 	}
 	line = jsonfmt.AppendCloser(line)
 	s.lineBuf = line // retain growth for reuse
-	_ = l.rawWriter.WriteRaw(line)
+	if err := l.rawWriter.WriteRaw(line); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[level].Add(1)
 	}

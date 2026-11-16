@@ -352,6 +352,24 @@ cfg := &config.ImmutableConfig{
 logger := halolog.GetLoggerWithConfig("my-app", cfg)
 ```
 
+### Adapter failures
+
+A write an adapter cannot complete (an endpoint down, a full disk) is never
+dropped silently. By default the logger reports it on stderr, at most once a
+second with the number of failures not shown, and `AdapterErrors` counts
+every one. A successful line pays a single nil check for this.
+
+```go
+logger := core.New().
+    Adapter(adapter).
+    OnAdapterError(func(adapter string, err error) {
+        failures.WithLabelValues(adapter).Inc() // your metrics, alerting, ...
+    }).
+    MustBuild()
+
+_ = logger.AdapterErrors() // failed adapter writes so far
+```
+
 ## Output adapters
 
 ### Console

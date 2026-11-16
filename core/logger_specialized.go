@@ -39,7 +39,9 @@ func (l *Logger) infoNoMaskOne(l2 *Logger, msg string) {
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.InfoLevel].Add(1)
 	}
@@ -54,7 +56,9 @@ func (l *Logger) infoNoMaskMulti(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.InfoLevel].Add(1)
@@ -70,7 +74,9 @@ func (l *Logger) infoMaskOne(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	l.masker.Apply(entry)
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.InfoLevel].Add(1)
 	}
@@ -86,7 +92,9 @@ func (l *Logger) infoMaskMulti(l2 *Logger, msg string) {
 
 	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.InfoLevel].Add(1)
@@ -105,7 +113,9 @@ func (l *Logger) debugNoMaskOne(l2 *Logger, msg string) {
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
 	}
@@ -120,7 +130,9 @@ func (l *Logger) debugNoMaskMulti(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
@@ -136,7 +148,9 @@ func (l *Logger) debugMaskOne(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	l.masker.Apply(entry)
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
 	}
@@ -152,7 +166,9 @@ func (l *Logger) debugMaskMulti(l2 *Logger, msg string) {
 
 	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.DebugLevel].Add(1)
@@ -171,7 +187,9 @@ func (l *Logger) warnNoMaskOne(l2 *Logger, msg string) {
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
 	}
@@ -186,7 +204,9 @@ func (l *Logger) warnNoMaskMulti(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
@@ -202,7 +222,9 @@ func (l *Logger) warnMaskOne(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	l.masker.Apply(entry)
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
 	}
@@ -218,7 +240,9 @@ func (l *Logger) warnMaskMulti(l2 *Logger, msg string) {
 
 	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.WarnLevel].Add(1)
@@ -237,7 +261,9 @@ func (l *Logger) errorNoMaskOne(l2 *Logger, msg string) {
 	entry.Component = l.component
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)
 	}
@@ -252,7 +278,9 @@ func (l *Logger) errorNoMaskMulti(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)
@@ -268,7 +296,9 @@ func (l *Logger) errorMaskOne(l2 *Logger, msg string) {
 	entry.TimestampUnix = l.clock.GetNsecValue()
 
 	l.masker.Apply(entry)
-	_ = l.adapters[0].WriteZero(entry)
+	if err := l.adapters[0].WriteZero(entry); err != nil {
+		l.adapterFailed(l.adapters[0], err)
+	}
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)
 	}
@@ -284,7 +314,9 @@ func (l *Logger) errorMaskMulti(l2 *Logger, msg string) {
 
 	l.masker.Apply(entry)
 	for _, a := range l.adapters {
-		_ = a.WriteZero(entry)
+		if err := a.WriteZero(entry); err != nil {
+			l.adapterFailed(a, err)
+		}
 	}
 	if l.metrics != nil {
 		l.metrics.counts[types.ErrorLevel].Add(1)

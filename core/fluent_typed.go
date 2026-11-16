@@ -423,7 +423,9 @@ func dispatchLine(l *Logger, s *perPState, epoch uint32, level types.LogLevel, m
 		line = append(line, s.directFields...)
 		line = jsonfmt.AppendCloser(line)
 		s.lineBuf = line // retain growth for reuse
-		_ = l.rawWriter.WriteRaw(line)
+		if err := l.rawWriter.WriteRaw(line); err != nil {
+			l.adapterFailed(l.adapters[0], err)
+		}
 		if l.metrics != nil {
 			l.metrics.counts[level].Add(1)
 		}
@@ -459,10 +461,14 @@ func dispatchLine(l *Logger, s *perPState, epoch uint32, level types.LogLevel, m
 		case l.discardAdapter != nil:
 			_ = l.discardAdapter.WriteZero(nil)
 		case len(l.adapters) == 1:
-			_ = l.adapters[0].WriteZero(entry)
+			if err := l.adapters[0].WriteZero(entry); err != nil {
+				l.adapterFailed(l.adapters[0], err)
+			}
 		default:
 			for _, a := range l.adapters {
-				_ = a.WriteZero(entry)
+				if err := a.WriteZero(entry); err != nil {
+					l.adapterFailed(a, err)
+				}
 			}
 		}
 
