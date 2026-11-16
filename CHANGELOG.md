@@ -8,6 +8,14 @@ All notable changes to HaloLog are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Changed
+- **YAML parsing uses `go.yaml.in/yaml/v4`**, maintained by the YAML
+  organization, instead of the archived `gopkg.in/yaml.v3`. Suggested by
+  @softexpert in #5. The new module has no dependencies of its own, so
+  `kr/pretty`, `go-internal`, and `check.v1` leave HaloLog's module graph.
+  Configuration files decode as before, except that a duration written as a
+  bare `0` is now accepted instead of rejected.
+
 ## [1.1.1] - 2026-09-30
 
 ### Fixed
